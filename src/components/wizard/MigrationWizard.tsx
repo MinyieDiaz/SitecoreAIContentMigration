@@ -9,13 +9,11 @@ import type { SelectedItem, TreeNode } from "@/lib/types";
 import { ConnectStep } from "./ConnectStep";
 import { ConnectionSummary } from "./ConnectionSummary";
 import { SelectContentStep } from "./SelectContentStep";
-import { ConfigureTransferStep } from "./ConfigureTransferStep";
 import { ReviewTransferStep } from "./ReviewTransferStep";
 
 const STEPS = [
   { label: "Connect", description: "Pick source & destination" },
-  { label: "Select content", description: "Browse the content tree" },
-  { label: "Configure", description: "Scope & merge strategy" },
+  { label: "Select content", description: "Browse, scope & merge strategy" },
   { label: "Review & transfer", description: "Run the migration" },
 ];
 
@@ -76,25 +74,18 @@ export function MigrationWizard() {
           sitecoreContextId={getSitecoreContextId(source)}
           selections={selections}
           onToggle={handleToggle}
+          onUpdate={handleUpdate}
           onBack={() => setCurrentStep(0)}
           onContinue={() => setCurrentStep(2)}
         />
       )}
-      {currentStep === 2 && (
-        <ConfigureTransferStep
-          selections={selections}
-          onUpdate={handleUpdate}
-          onBack={() => setCurrentStep(1)}
-          onContinue={() => setCurrentStep(3)}
-        />
-      )}
-      {currentStep === 3 && client && source && destination && (
+      {currentStep === 2 && client && source && destination && (
         <ReviewTransferStep
           client={client}
           sourceContextId={getSitecoreContextId(source)}
           destinationContextId={getSitecoreContextId(destination)}
           selections={selections}
-          onBack={() => setCurrentStep(2)}
+          onBack={() => setCurrentStep(1)}
         />
       )}
     </div>

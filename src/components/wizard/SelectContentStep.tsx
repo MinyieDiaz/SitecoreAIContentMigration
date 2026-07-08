@@ -4,14 +4,34 @@ import { mdiClose } from "@mdi/js";
 import type { ClientSDK } from "@sitecore-marketplace-sdk/client";
 import { Icon } from "@/lib/icon";
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { ContentTree } from "@/components/tree/ContentTree";
-import type { SelectedItem, TreeNode } from "@/lib/types";
+import { MERGE_STRATEGY_LABELS, SCOPE_LABELS } from "@/lib/labels";
+import type { MergeStrategy, SelectedItem, TransferScope, TreeNode } from "@/lib/types";
+
+const SCOPE_OPTIONS = Object.entries(SCOPE_LABELS) as [TransferScope, string][];
+const MERGE_STRATEGY_OPTIONS = Object.entries(MERGE_STRATEGY_LABELS) as [MergeStrategy, string][];
 
 interface SelectContentStepProps {
   client: ClientSDK;
   sitecoreContextId: string;
   selections: SelectedItem[];
   onToggle: (node: TreeNode, checked: boolean) => void;
+  onUpdate: (path: string, patch: Partial<Pick<SelectedItem, "scope" | "mergeStrategy">>) => void;
   onBack: () => void;
   onContinue: () => void;
 }
@@ -21,6 +41,7 @@ export function SelectContentStep({
   sitecoreContextId,
   selections,
   onToggle,
+  onUpdate,
   onBack,
   onContinue,
 }: SelectContentStepProps) {
@@ -31,7 +52,8 @@ export function SelectContentStep({
       <div>
         <h2 className="text-lg font-semibold">Select content</h2>
         <p className="text-sm text-muted-foreground">
-          Browse the source environment&apos;s content tree and select the items to migrate.
+          Browse the source environment&apos;s content tree, select the items to migrate, and choose
+          each item&apos;s scope and merge strategy.
         </p>
       </div>
 
@@ -44,21 +66,67 @@ export function SelectContentStep({
         />
 
         <div className="rounded-md border p-3">
-          <p className="mb-2 text-sm font-medium">
-            Selected ({selections.length})
+          <p className="text-sm font-medium">Selected ({selections.length})</p>
+          <p className="text-sm text-muted-foreground">
+            {selections.length === 0
+              ? "Nothing selected yet."
+              : "Configure each item's scope and merge strategy below."}
           </p>
-          {selections.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Nothing selected yet.</p>
-          ) : (
-            <ul className="space-y-1">
-              {selections.map((item) => (
-                <li
-                  key={item.path}
-                  className="flex items-center justify-between gap-2 rounded-sm px-2 py-1 text-sm hover:bg-neutral-bg"
-                >
-                  <span className="truncate" title={item.path}>
-                    {item.name}
-                  </span>
+        </div>
+      </div>
+
+      {selections.length > 0 && (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Item</TableHead>
+              <TableHead>Scope</TableHead>
+              <TableHead>Merge strategy</TableHead>
+              <TableHead className="w-0" />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {selections.map((item) => (
+              <TableRow key={item.path}>
+                <TableCell>
+                  <p className="font-medium">{item.name}</p>
+                  <p className="text-sm text-muted-foreground">{item.path}</p>
+                </TableCell>
+                <TableCell>
+                  <Select
+                    value={item.scope}
+                    onValueChange={(value) => onUpdate(item.path, { scope: value as TransferScope })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {SCOPE_OPTIONS.map(([value, label]) => (
+                        <SelectItem key={value} value={value}>
+                          {label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </TableCell>
+                <TableCell>
+                  <Select
+                    value={item.mergeStrategy}
+                    onValueChange={(value) => onUpdate(item.path, { mergeStrategy: value as MergeStrategy })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {MERGE_STRATEGY_OPTIONS.map(([value, label]) => (
+                        <SelectItem key={value} value={value}>
+                          {label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </TableCell>
+                <TableCell>
                   <Button
                     variant="ghost"
                     size="icon-xs"
@@ -72,12 +140,12 @@ export function SelectContentStep({
                   >
                     <Icon path={mdiClose} size={0.7} />
                   </Button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </div>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
 
       <div className="flex justify-between">
         <Button variant="outline" onClick={onBack}>
