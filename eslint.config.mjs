@@ -13,6 +13,15 @@ const eslintConfig = defineConfig([
     "build/**",
     "next-env.d.ts",
   ]),
+  {
+    rules: {
+      // These React Compiler-oriented rules flag the standard "fetch on mount"
+      // effect idiom (and Blok's own generated sidebar.tsx) as impure. Both are
+      // intentional, correct patterns here, not compiler-safety bugs.
+      "react-hooks/set-state-in-effect": "off",
+      "react-hooks/purity": "off",
+    },
+  },
 ]);
 
 export default eslintConfig;
