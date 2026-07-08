@@ -4,6 +4,7 @@ import { mdiCompassOutline, mdiSwapHorizontal } from "@mdi/js";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Icon } from "@/lib/icon";
+import { Logo } from "@/components/logo";
 import {
   Sidebar,
   SidebarContent,
@@ -27,7 +28,7 @@ export function AppSidebar() {
     <Sidebar>
       <SidebarContent>
         <div className="px-4 py-3">
-          <p className="text-md font-semibold">Content Migration</p>
+          <Logo iconClassName="size-6" textClassName="text-md" />
           <p className="text-sm text-muted-foreground">SitecoreAI to SitecoreAI</p>
         </div>
         <SidebarGroup>

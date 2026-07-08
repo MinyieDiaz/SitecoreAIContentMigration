@@ -66,34 +66,6 @@ export async function deleteBlob(host: string, token: string, blobName: string):
   await assertOk(response, "Delete blob");
 }
 
-// Called against the DESTINATION environment. blobName is a query parameter --
-// this endpoint takes no request body. The response has no JSON body either; the
-// `location` header's final path segment is the source name used everywhere else
-// (getTransfer, retryTransfer, listTransferredItems, ...).
-export async function startConsume(
-  host: string,
-  token: string,
-  databaseName: string,
-  blobName: string
-): Promise<{ sourceName: string }> {
-  const url = new URL(`${baseUrl(host)}/transfers/databases/${encodeURIComponent(databaseName)}/sources`);
-  url.searchParams.set("blobName", blobName);
-
-  const response = await fetch(url, {
-    method: "POST",
-    headers: authHeaders(token),
-    cache: "no-store",
-  });
-  await assertOk(response, "Start consuming blob");
-
-  const location = response.headers.get("location");
-  const sourceName = location?.split("/").pop();
-  if (!sourceName) {
-    throw new ItemTransferError("Start consume response did not include a location header");
-  }
-  return { sourceName: decodeURIComponent(sourceName) };
-}
-
 export type TransferState = "Unknown" | "InProgress" | "Finished" | "Failed" | "Queued" | "Discarded";
 
 export interface TransferSummary {

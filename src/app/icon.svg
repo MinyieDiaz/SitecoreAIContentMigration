@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 72 72">
+  <style>
+    .src { fill: #6e3fff; }
+    .dst { fill: #eae7ff; stroke: #6e3fff; }
+    .arrow { stroke: #6e3fff; }
+    @media (prefers-color-scheme: dark) {
+      .src { fill: #9373ff; }
+      .dst { fill: #2f1469; stroke: #9373ff; }
+      .arrow { stroke: #b8a9ff; }
+    }
+  </style>
+  <rect class="src" x="4" y="24" width="24" height="24" rx="6"/>
+  <rect class="dst" x="44" y="24" width="24" height="24" rx="6" stroke-width="2.5"/>
+  <path class="arrow" d="M30 36H41" stroke-width="3" stroke-linecap="round" fill="none"/>
+  <path class="arrow" d="M37 31L42 36L37 41" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+</svg>
