@@ -42,13 +42,20 @@ export type JobStatus = "pending" | "transferring-chunks" | "consuming" | "done"
 // multi-item transfer. ChunkSetProgress entries are index-aligned with
 // TransferJob.items: the confirmed OpenAPI spec doesn't echo back which item a
 // chunk set came from, so order-of-submission is the only correlation available.
+//
+// consumeRequested (rather than a resolved destination source name): the
+// Marketplace SDK's `xmc.contentTransfer.consumeFile` has no response body and
+// no headers exposed to app code, unlike the raw Item Transfer API's `location`
+// header this app used to parse a `sourceName` out of. Nothing today actually
+// correlates a wizard job to a specific Explorer transfer row, so a boolean
+// "was consume requested" is all that's needed to gate the job as done.
 export interface ChunkSetProgress {
   chunkSetId: string;
   chunkCount: number;
   chunksTransferred: number;
   completed: boolean;
   blobName?: string;
-  destinationSourceName?: string;
+  consumeRequested?: boolean;
 }
 
 export interface TransferJob {

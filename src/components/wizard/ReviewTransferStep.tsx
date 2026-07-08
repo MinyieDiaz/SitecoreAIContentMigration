@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
+import type { ClientSDK } from "@sitecore-marketplace-sdk/client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
@@ -15,6 +16,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { MERGE_STRATEGY_LABELS, SCOPE_LABELS } from "@/lib/labels";
+import { useTransferJob } from "@/hooks/use-transfer-job";
 import type { JobStatus, SelectedItem, TransferJob } from "@/lib/types";
 
 const STATUS_LABEL: Record<JobStatus, string> = {
@@ -45,71 +47,33 @@ function jobProgress(job: TransferJob | null): number {
 }
 
 interface ReviewTransferStepProps {
+  client: ClientSDK;
+  sourceContextId: string;
+  destinationContextId: string;
   selections: SelectedItem[];
   onBack: () => void;
 }
 
-export function ReviewTransferStep({ selections, onBack }: ReviewTransferStepProps) {
-  const [job, setJob] = useState<TransferJob | null>(null);
-  const [running, setRunning] = useState(false);
-  const cancelledRef = useRef(false);
+export function ReviewTransferStep({
+  client,
+  sourceContextId,
+  destinationContextId,
+  selections,
+  onBack,
+}: ReviewTransferStepProps) {
+  const { job, running, start, retry } = useTransferJob(client, sourceContextId, destinationContextId);
+  const notifiedRef = useRef<TransferJob["status"] | null>(null);
 
-  useEffect(
-    () => () => {
-      cancelledRef.current = true;
-    },
-    []
-  );
+  useEffect(() => {
+    if (!job || !running) return;
+    if (job.status !== "done" && job.status !== "failed") return;
+    if (notifiedRef.current === job.status) return;
+    notifiedRef.current = job.status;
+    if (job.status === "failed") toast.error("Migration failed");
+    else toast.success("Items submitted for transfer");
+  }, [job, running]);
 
-  const runLoop = useCallback(async (jobId: string) => {
-    cancelledRef.current = false;
-    setRunning(true);
-    try {
-      while (!cancelledRef.current) {
-        const response = await fetch(`/api/transfer/${jobId}/step`, { method: "POST" });
-        const body = await response.json();
-        if (!response.ok) {
-          toast.error(body.error ?? "Transfer step failed");
-          break;
-        }
-        setJob(body.job);
-        if (body.complete) {
-          if ((body.job as TransferJob).status === "failed") toast.error("Migration failed");
-          else toast.success("Items submitted for transfer");
-          break;
-        }
-      }
-    } finally {
-      setRunning(false);
-    }
-  }, []);
-
-  const handleStart = async () => {
-    const response = await fetch("/api/transfer", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ items: selections }),
-    });
-    const body = await response.json();
-    if (!response.ok) {
-      toast.error(body.error ?? "Failed to start transfer");
-      return;
-    }
-    setJob(body.job);
-    runLoop(body.job.jobId);
-  };
-
-  const handleRetry = async () => {
-    if (!job) return;
-    const response = await fetch(`/api/transfer/${job.jobId}/retry`, { method: "POST" });
-    const body = await response.json();
-    if (!response.ok) {
-      toast.error(body.error ?? "Failed to retry");
-      return;
-    }
-    setJob(body.job);
-    runLoop(job.jobId);
-  };
+  const handleStart = () => start(selections);
 
   return (
     <div className="space-y-6">
@@ -126,7 +90,7 @@ export function ReviewTransferStep({ selections, onBack }: ReviewTransferStepPro
           <div className="flex items-center justify-between">
             <Badge colorScheme={STATUS_COLOR[job.status]}>{STATUS_LABEL[job.status]}</Badge>
             {job.status === "failed" && (
-              <Button variant="outline" size="sm" onClick={handleRetry}>
+              <Button variant="outline" size="sm" onClick={retry}>
                 Retry
               </Button>
             )}

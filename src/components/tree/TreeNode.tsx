@@ -2,22 +2,25 @@
 
 import { mdiChevronRight, mdiFileDocumentOutline, mdiFolderOutline } from "@mdi/js";
 import { useState } from "react";
+import type { ClientSDK } from "@sitecore-marketplace-sdk/client";
 import { Icon } from "@/lib/icon";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-import type { Role, TreeNode as TreeNodeData } from "@/lib/types";
+import { getItemChildren } from "@/lib/sitecore/xmcAuthoring";
+import type { TreeNode as TreeNodeData } from "@/lib/types";
 
 interface TreeNodeProps {
-  role: Role;
+  client: ClientSDK;
+  sitecoreContextId: string;
   node: TreeNodeData;
   depth: number;
   isSelected: (path: string) => boolean;
   onToggle: (node: TreeNodeData, checked: boolean) => void;
 }
 
-export function TreeNode({ role, node, depth, isSelected, onToggle }: TreeNodeProps) {
+export function TreeNode({ client, sitecoreContextId, node, depth, isSelected, onToggle }: TreeNodeProps) {
   const [expanded, setExpanded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -37,12 +40,8 @@ export function TreeNode({ role, node, depth, isSelected, onToggle }: TreeNodePr
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(
-        `/api/tree?role=${role}&path=${encodeURIComponent(node.path)}`
-      );
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.error ?? "Failed to load children");
-      setChildren(body.children as TreeNodeData[]);
+      const nodes = await getItemChildren(client, sitecoreContextId, node.path);
+      setChildren(nodes);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load children");
     } finally {
@@ -107,7 +106,8 @@ export function TreeNode({ role, node, depth, isSelected, onToggle }: TreeNodePr
           {children?.map((child) => (
             <TreeNode
               key={child.itemId}
-              role={role}
+              client={client}
+              sitecoreContextId={sitecoreContextId}
               node={child}
               depth={depth + 1}
               isSelected={isSelected}

@@ -1,18 +1,21 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import type { ClientSDK } from "@sitecore-marketplace-sdk/client";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { DEFAULT_ROOT_PATH, type Role, type SiteSummary, type TreeNode as TreeNodeData } from "@/lib/types";
+import { DEFAULT_ROOT_PATH, type SiteSummary, type TreeNode as TreeNodeData } from "@/lib/types";
+import { getItemChildren, listSites } from "@/lib/sitecore/xmcAuthoring";
 import { TreeNode } from "./TreeNode";
 
 interface ContentTreeProps {
-  role: Role;
+  client: ClientSDK;
+  sitecoreContextId: string;
   isSelected: (path: string) => boolean;
   onToggle: (node: TreeNodeData, checked: boolean) => void;
 }
 
-export function ContentTree({ role, isSelected, onToggle }: ContentTreeProps) {
+export function ContentTree({ client, sitecoreContextId, isSelected, onToggle }: ContentTreeProps) {
   const [rootNodes, setRootNodes] = useState<TreeNodeData[] | null>(null);
   const [sites, setSites] = useState<SiteSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -24,17 +27,13 @@ export function ContentTree({ role, isSelected, onToggle }: ContentTreeProps) {
       setError(null);
       setRootNodes(null);
       try {
-        const [treeResponse, sitesResponse] = await Promise.all([
-          fetch(`/api/tree?role=${role}&path=${encodeURIComponent(DEFAULT_ROOT_PATH)}`),
-          fetch(`/api/sites?role=${role}`),
+        const [children, siteList] = await Promise.all([
+          getItemChildren(client, sitecoreContextId, DEFAULT_ROOT_PATH),
+          listSites(client, sitecoreContextId).catch(() => []),
         ]);
-        const treeBody = await treeResponse.json();
-        if (!treeResponse.ok) throw new Error(treeBody.error ?? "Failed to load content tree");
-
-        const sitesBody = await sitesResponse.json();
         if (!cancelled) {
-          setRootNodes(treeBody.children as TreeNodeData[]);
-          if (sitesResponse.ok) setSites(sitesBody.sites as SiteSummary[]);
+          setRootNodes(children);
+          setSites(siteList);
         }
       } catch (err) {
         if (!cancelled) {
@@ -47,7 +46,7 @@ export function ContentTree({ role, isSelected, onToggle }: ContentTreeProps) {
     return () => {
       cancelled = true;
     };
-  }, [role]);
+  }, [client, sitecoreContextId]);
 
   return (
     <div className="space-y-3">
@@ -74,7 +73,8 @@ export function ContentTree({ role, isSelected, onToggle }: ContentTreeProps) {
         {rootNodes?.map((node) => (
           <TreeNode
             key={node.itemId}
-            role={role}
+            client={client}
+            sitecoreContextId={sitecoreContextId}
             node={node}
             depth={0}
             isSelected={isSelected}

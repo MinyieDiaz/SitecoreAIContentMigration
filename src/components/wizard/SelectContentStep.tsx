@@ -1,19 +1,29 @@
 "use client";
 
 import { mdiClose } from "@mdi/js";
+import type { ClientSDK } from "@sitecore-marketplace-sdk/client";
 import { Icon } from "@/lib/icon";
 import { Button } from "@/components/ui/button";
 import { ContentTree } from "@/components/tree/ContentTree";
 import type { SelectedItem, TreeNode } from "@/lib/types";
 
 interface SelectContentStepProps {
+  client: ClientSDK;
+  sitecoreContextId: string;
   selections: SelectedItem[];
   onToggle: (node: TreeNode, checked: boolean) => void;
   onBack: () => void;
   onContinue: () => void;
 }
 
-export function SelectContentStep({ selections, onToggle, onBack, onContinue }: SelectContentStepProps) {
+export function SelectContentStep({
+  client,
+  sitecoreContextId,
+  selections,
+  onToggle,
+  onBack,
+  onContinue,
+}: SelectContentStepProps) {
   const selectedPaths = new Set(selections.map((item) => item.path));
 
   return (
@@ -26,7 +36,12 @@ export function SelectContentStep({ selections, onToggle, onBack, onContinue }: 
       </div>
 
       <div className="grid gap-4 md:grid-cols-[2fr_1fr]">
-        <ContentTree role="source" isSelected={(path) => selectedPaths.has(path)} onToggle={onToggle} />
+        <ContentTree
+          client={client}
+          sitecoreContextId={sitecoreContextId}
+          isSelected={(path) => selectedPaths.has(path)}
+          onToggle={onToggle}
+        />
 
         <div className="rounded-md border p-3">
           <p className="mb-2 text-sm font-medium">
