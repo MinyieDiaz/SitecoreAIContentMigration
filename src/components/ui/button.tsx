@@ -172,6 +172,13 @@ function Button({
   size,
   colorScheme,
   asChild = false,
+  // This app has no <form> elements, so a Button is never meant to submit one --
+  // but a plain <button> with no type attribute defaults to type="submit" per the
+  // HTML spec, which can trigger a native submit/navigation if it ends up inside
+  // *any* form-associated context (including ones this app doesn't render itself,
+  // e.g. host page markup). Radix's own trigger primitives guard against this the
+  // same way; this component didn't, silently.
+  type = "button",
   ...props
 }: React.ComponentProps<"button"> &
   VariantProps<typeof buttonVariants> & {
@@ -199,6 +206,7 @@ function Button({
   return (
     <Comp
       data-slot="button"
+      type={asChild ? undefined : type}
       className={cn(
         buttonVariants({
           variant,

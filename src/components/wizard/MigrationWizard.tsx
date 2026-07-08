@@ -7,6 +7,7 @@ import { getSitecoreContextId } from "@/lib/sitecore/xmcContext";
 import type { ResourceAccessEntry } from "@/hooks/use-marketplace-client";
 import type { SelectedItem, TreeNode } from "@/lib/types";
 import { ConnectStep } from "./ConnectStep";
+import { ConnectionSummary } from "./ConnectionSummary";
 import { SelectContentStep } from "./SelectContentStep";
 import { ConfigureTransferStep } from "./ConfigureTransferStep";
 import { ReviewTransferStep } from "./ReviewTransferStep";
@@ -55,6 +56,10 @@ export function MigrationWizard() {
   return (
     <div className="mx-auto w-full max-w-5xl space-y-8">
       <Stepper steps={STEPS} currentStep={currentStep} />
+
+      {currentStep > 0 && source && destination && (
+        <ConnectionSummary source={source} destination={destination} />
+      )}
 
       {currentStep === 0 && (
         <ConnectStep

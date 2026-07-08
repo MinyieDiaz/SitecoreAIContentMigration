@@ -33,9 +33,19 @@ const cookieOptions = {
   password: requireSessionSecret(),
   ttl: SESSION_TTL_MS / 1000,
   cookieOptions: {
-    secure: process.env.NODE_ENV === "production",
+    // This app is always embedded in an iframe inside Sitecore Cloud Portal, a
+    // different site from wherever this app is hosted -- SameSite is evaluated
+    // against the top-level site, not the immediate request's origin, so even a
+    // same-origin fetch from inside that iframe counts as cross-site. SameSite=Lax
+    // silently drops the cookie in that context (both setting and sending it),
+    // which looks like "connect succeeds, then the very next request finds no
+    // session." SameSite=None is what cross-site-embedded apps need, and it
+    // requires Secure -- browsers reject None cookies without it. Secure works
+    // fine over plain http://localhost too (browsers treat localhost as a secure
+    // context by spec), so this doesn't need to be conditional on NODE_ENV.
+    secure: true,
     httpOnly: true,
-    sameSite: "lax" as const,
+    sameSite: "none" as const,
   },
 };
 
