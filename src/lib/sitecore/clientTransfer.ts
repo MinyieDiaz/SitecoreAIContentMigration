@@ -167,13 +167,17 @@ export async function completeChunkSet(
 // consuming a completed .raif blob. Unlike the raw Item Transfer API's
 // startConsume, this has no response body/headers -- there's no sourceName to
 // recover from it, only confirmation the request was accepted.
+//
+// `fileName` requires an explicit `blob://` or `file://` schema prefix -- the
+// completeChunkSetTransfer-produced .raif always lives in blob storage, so
+// this always prefixes with `blob://` rather than taking the schema as a param.
 export async function consumeFile(
   client: ClientSDK,
   sitecoreContextId: string,
-  fileName: string
+  blobName: string
 ): Promise<void> {
   const outer = await client.query("xmc.contentTransfer.consumeFile", {
-    params: { query: { databaseName: DATABASE_NAME, fileName, sitecoreContextId } },
+    params: { query: { databaseName: DATABASE_NAME, fileName: `blob://${blobName}`, sitecoreContextId } },
   });
   assertNoError(unwrapQueryOuter(outer, "Consume file"), "Consume file");
 }

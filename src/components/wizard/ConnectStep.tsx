@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useMarketplaceContext } from "@/components/marketplace/MarketplaceProvider";
-import { getEnvironmentLabel } from "@/lib/sitecore/xmcContext";
+import { getEnvironmentLabel, getSitecoreContextId } from "@/lib/sitecore/xmcContext";
 import type { ResourceAccessEntry } from "@/hooks/use-marketplace-client";
 
 interface ConnectStepProps {
@@ -103,7 +103,8 @@ export function ConnectStep({
   }
 
   const bothSelected = !!source && !!destination;
-  const sameEntry = !!source && !!destination && source.resourceId === destination.resourceId;
+  const sameEntry =
+    !!source && !!destination && getSitecoreContextId(source) === getSitecoreContextId(destination);
 
   return (
     <div className="space-y-6">
@@ -116,9 +117,11 @@ export function ConnectStep({
               <FieldLabel>Source environment</FieldLabel>
             </FieldContent>
             <Select
-              value={source?.resourceId ?? ""}
-              onValueChange={(resourceId) =>
-                onSelectSource(resourceAccess.find((entry) => entry.resourceId === resourceId) ?? null)
+              value={source ? getSitecoreContextId(source) : ""}
+              onValueChange={(contextId) =>
+                onSelectSource(
+                  resourceAccess.find((entry) => getSitecoreContextId(entry) === contextId) ?? null
+                )
               }
             >
               <SelectTrigger className="w-full">
@@ -126,7 +129,7 @@ export function ConnectStep({
               </SelectTrigger>
               <SelectContent>
                 {resourceAccess.map((entry) => (
-                  <SelectItem key={entry.resourceId} value={entry.resourceId}>
+                  <SelectItem key={getSitecoreContextId(entry)} value={getSitecoreContextId(entry)}>
                     {getEnvironmentLabel(entry)}
                   </SelectItem>
                 ))}
@@ -141,9 +144,11 @@ export function ConnectStep({
               <FieldLabel>Destination environment</FieldLabel>
             </FieldContent>
             <Select
-              value={destination?.resourceId ?? ""}
-              onValueChange={(resourceId) =>
-                onSelectDestination(resourceAccess.find((entry) => entry.resourceId === resourceId) ?? null)
+              value={destination ? getSitecoreContextId(destination) : ""}
+              onValueChange={(contextId) =>
+                onSelectDestination(
+                  resourceAccess.find((entry) => getSitecoreContextId(entry) === contextId) ?? null
+                )
               }
             >
               <SelectTrigger className="w-full">
@@ -151,7 +156,7 @@ export function ConnectStep({
               </SelectTrigger>
               <SelectContent>
                 {resourceAccess.map((entry) => (
-                  <SelectItem key={entry.resourceId} value={entry.resourceId}>
+                  <SelectItem key={getSitecoreContextId(entry)} value={getSitecoreContextId(entry)}>
                     {getEnvironmentLabel(entry)}
                   </SelectItem>
                 ))}
