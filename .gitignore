@@ -43,3 +43,4 @@ next-env.d.ts
 /.vs/slnx.sqlite
 /.vs/ContentMigration.slnx/FileContentIndex
 /.vs/ContentMigration.slnx/v18/.wsuo
+/.vs

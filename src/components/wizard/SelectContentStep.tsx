@@ -24,7 +24,13 @@ import { MERGE_STRATEGY_LABELS, SCOPE_LABELS } from "@/lib/labels";
 import type { MergeStrategy, SelectedItem, TransferScope, TreeNode } from "@/lib/types";
 
 const SCOPE_OPTIONS = Object.entries(SCOPE_LABELS) as [TransferScope, string][];
-const MERGE_STRATEGY_OPTIONS = Object.entries(MERGE_STRATEGY_LABELS) as [MergeStrategy, string][];
+
+// LatestWin is excluded from the picker: Sitecore has a confirmed bug in that
+// merge strategy. It's kept in MergeStrategy/MERGE_STRATEGY_LABELS so past jobs
+// that used it still display correctly in the Explorer.
+const MERGE_STRATEGY_OPTIONS = (
+  Object.entries(MERGE_STRATEGY_LABELS) as [MergeStrategy, string][]
+).filter(([value]) => value !== "LatestWin");
 
 interface SelectContentStepProps {
   client: ClientSDK;
