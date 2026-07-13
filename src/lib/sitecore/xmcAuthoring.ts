@@ -12,8 +12,10 @@ export class GraphQLRequestError extends Error {
 
 // Sites are exposed as flat { name } records by the Authoring & Management GraphQL
 // schema; there's no confirmed field for a site's content root path, so navigation
-// always starts at /sitecore/content and the user drills down from there. Site
-// names are surfaced as a hint, not as a resolved shortcut path.
+// always starts at /sitecore (the full content tree, including /sitecore/templates,
+// /sitecore/layouts, /sitecore/media library, /sitecore/system, etc.) and the user
+// drills down from there. Site names are surfaced as a hint, not as a resolved
+// shortcut path.
 const SITES_QUERY = `
   query Sites {
     sites {

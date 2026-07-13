@@ -1,6 +1,6 @@
 export type Role = "source" | "destination";
 
-export const DEFAULT_ROOT_PATH = "/sitecore/content";
+export const DEFAULT_ROOT_PATH = "/sitecore";
 
 export type TransferScope = "SingleItem" | "ItemAndDescendants";
 
