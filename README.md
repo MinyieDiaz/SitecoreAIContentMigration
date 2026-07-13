@@ -1,6 +1,6 @@
 # Content Migration
 
-An internal Sitecore Marketplace app for migrating content between two SitecoreAI
+A Sitecore Marketplace app for migrating content between two SitecoreAI
 environments — a **source** and a **destination** — using Sitecore's Content Transfer
 and Item Transfer REST APIs, driven by a guided wizard instead of raw API calls.
 
@@ -8,30 +8,40 @@ and Item Transfer REST APIs, driven by a guided wizard instead of raw API calls.
 
 Given a source and a destination SitecoreAI environment, this app lets you:
 
-1. Authorize against both environments with automation client credentials.
-2. Browse the source environment's content tree (via GraphQL) and pick one or more
-   items to migrate.
-3. Choose, per item, whether to include descendants and how to handle conflicts
-   with existing content on the destination.
-4. Run the migration and submit it to the destination.
-5. Inspect in-flight and historical transfers, uploaded packages ("blobs"), and
-   individual transferred items from a separate Explorer view.
+1. Pick the source and destination from the environments this app was granted
+   access to when it was installed — as a Sitecore Marketplace app, it gets its
+   authorization from the Sitecore Cloud Portal context it's running in, so no
+   client credentials are entered here.
+2. Browse the source environment's full content tree (via GraphQL) — including
+   `/sitecore/templates`, `/sitecore/layouts`, `/sitecore/media library`, and
+   `/sitecore/system`, not just site content — and pick one or more items to
+   migrate, choosing per item whether to include descendants and how to handle
+   conflicts with existing content on the destination.
+3. Run the migration and submit it to the destination.
+4. Inspect in-flight and historical transfers, uploaded packages ("blobs"), and
+   individual transferred items from a separate Explorer view (its own
+   destination connection, independent of the wizard — see **Prerequisites**).
 
-Nothing is persisted to a database — environment credentials are exchanged for a
-short-lived token and held only for your browser session (see **How it works**
-below).
+Nothing is persisted to a database — the Explorer's destination credentials are
+exchanged for a short-lived token and held only for your browser session (see
+**How it works** below).
 
 ## Prerequisites
 
 - Node.js 20+ and npm.
-- For each environment you want to use as a source or destination: a Sitecore
-  Cloud Portal **automation client ID/secret** with **Organization Admin or Owner**
-  access (SitecoreAI Deploy → Credentials → Environment → Create credentials →
-  Automation). You'll enter these directly into the app — they are never stored
+- This app must be installed as a Sitecore Marketplace app in Sitecore Cloud
+  Portal, with **resource access** granted to at least two environments (a
+  source and a destination) — that grant is what populates the Migration
+  Wizard's environment pickers, so no manual credentials are needed there.
+- The **Explorer** view connects to a destination independently of the wizard
+  and still needs manual credentials for it: a Sitecore Cloud Portal
+  **automation client ID/secret** with **Organization Admin or Owner** access
+  (SitecoreAI Deploy → Credentials → Environment → Create credentials →
+  Automation), plus that environment's host name (SitecoreAI Deploy →
+  Projects → your project → Authoring environments → your environment →
+  Details → Environment host name, e.g. `your-environment.sitecorecloud.io`).
+  You'll enter these directly into the Explorer — they are never stored
   anywhere.
-- The environment host name for each environment (SitecoreAI Deploy → Projects →
-  your project → Authoring environments → your environment → Details →
-  Environment host name), e.g. `your-environment.sitecorecloud.io`.
 
 ## Setup
 
@@ -58,24 +68,32 @@ production build), `npm run lint`.
 
 ## How to use it
 
-The app is a four-step wizard:
+The app is a three-step wizard:
 
-1. **Connect** — enter the host, client ID, and client secret for both the
-   source and destination environments, and test each connection. Both must
-   succeed before you can continue.
-2. **Select content** — pick a site, then browse and check the items you want
-   to migrate from the source's content tree.
-3. **Configure** — for each selected item, choose its **scope** (the item alone,
-   or the item and all descendants) and **merge strategy** (how to handle a
-   conflict if the item already exists on the destination).
-4. **Review & transfer** — confirm your selections and start the migration.
+1. **Connect** — pick the source and destination from a dropdown of the
+   environments this app installation was granted access to in Sitecore Cloud
+   Portal. No host, client ID, or client secret entry here: as a Marketplace
+   app, it's already authorized for those environments by the context it's
+   running in.
+2. **Select content** — browse and check the items you want to migrate from
+   the source's full content tree (starting at `/sitecore`, so templates,
+   layouts, the media library, and system items are all reachable, not just
+   site content). For each selected item, choose its **scope** (the item
+   alone, or the item and all descendants) and **merge strategy** (how to
+   handle a conflict if the item already exists on the destination) inline in
+   the same table — there's no separate configure step. Note: **Latest wins**
+   is defined by the API but currently hidden from the picker due to a
+   confirmed Sitecore bug in that strategy.
+3. **Review & transfer** — confirm your selections and start the migration.
    Progress is shown live as the content is packaged on the source and sent to
    the destination.
 
 Because the destination processes each item asynchronously, the wizard reports
 **Submitted** once the destination has accepted every item, not confirmed
 completion — it doesn't sit and wait for Sitecore to finish writing the data.
-To check on the actual outcome, use the **Explorer** (linked from the sidebar):
+To check on the actual outcome, use the **Explorer** (linked from the
+sidebar) — it connects to the destination environment independently of the
+wizard, so you'll need to authorize it separately:
 
 - **Transfers** — currently active and recently completed transfers, with the
   ability to view the items in a transfer or retry a failed one.
@@ -89,20 +107,74 @@ finishes and refresh to see its latest status.
 
 ## How it works
 
-- Every Sitecore API call happens server-side (Next.js API routes) — the
-  browser never talks to Sitecore directly, and your client secrets never
-  leave the server.
-- Credentials are exchanged for a JWT once, then held only for your session:
-  a small session ID lives in an encrypted, httpOnly cookie, and the actual
-  tokens live in server memory. Nothing touches disk or a database, and
-  everything is discarded when the session ends or the server restarts.
-- Migrating an item is a two-phase process: the **Content Transfer API** packages
-  it up on the source environment as one or more chunked files, and the
-  **Item Transfer API** consumes those files into the destination environment's
-  database. This app relays the chunks between the two automatically.
-- Migration runs as a series of small steps rather than one long request, so
-  the browser polls for progress instead of waiting on a single call that
-  could time out.
+The Migration Wizard and the Explorer authorize against Sitecore differently:
+
+- **Migration Wizard** — runs embedded in Sitecore Cloud Portal and calls
+  Sitecore through the Sitecore Marketplace SDK's `xmc` module in the
+  browser. The Portal authenticates those calls using the access this app
+  installation was already granted, so no client ID or secret ever passes
+  through this app for the wizard flow.
+- **Explorer** — connects to a destination independently, using automation
+  client credentials you enter directly into it. Every Sitecore API call for
+  that flow happens server-side (Next.js API routes) — the browser never
+  talks to Sitecore directly, and your client secret never leaves the
+  server. The credentials are exchanged for a JWT once, then held only for
+  your session: a small session ID lives in an encrypted, httpOnly cookie,
+  and the actual token lives in server memory. Nothing touches disk or a
+  database, and everything is discarded when the session ends or the server
+  restarts.
+- Migrating an item is a two-phase process either way: the **Content
+  Transfer API** packages it up on the source environment as one or more
+  chunked files, and the **Item Transfer API** consumes those files into the
+  destination environment's database. The wizard relays the chunks between
+  the two automatically, one small step at a time, so progress is observable
+  as it happens rather than waiting on one long call that could time out.
 
 For implementation-level detail (request/response shapes, the job state
 machine, known API quirks), see `CLAUDE.md` in the repo root.
+
+## Terms & Conditions
+
+This app is provided "as is," without warranty of any kind, express or implied,
+including but not limited to warranties of merchantability, fitness for a
+particular purpose, and non-infringement. Use of this app is at your own risk.
+
+By using this app you agree that:
+
+- You are responsible for the accuracy, legality, and appropriateness of any
+  content you migrate between environments, and for having proper authorization
+  to access and modify both the source and destination environments.
+- The maintainers are not liable for any data loss, corruption, downtime, or
+  other damages arising from use of this app, including from its interaction
+  with third-party Sitecore APIs.
+- This app may be modified, suspended, or discontinued at any time without
+  notice.
+- Sitecore, SitecoreAI, and related marks are trademarks of Sitecore
+  Corporation. This app is not officially endorsed by or affiliated with
+  Sitecore Corporation.
+
+These terms may be updated at any time by updating this document.
+
+## Privacy Policy
+
+This app does not collect, store, or transmit personal data to any third party
+beyond what is strictly necessary to perform the migration you request.
+
+- **Credentials**: environment host names, client IDs, and client secrets you
+  enter are sent directly to Sitecore's authentication endpoint to obtain a
+  short-lived access token, then discarded from the request. They are never
+  written to disk, a database, or any logging system.
+- **Session data**: the resulting access tokens are held only in server
+  memory for the lifetime of your browser session (tied to an httpOnly,
+  encrypted session cookie) and are cleared when the session ends or the
+  server restarts.
+- **Content**: item content is relayed directly between the source and
+  destination Sitecore environments you specify. It is not persisted by this
+  app beyond the transient chunks needed to complete an in-progress transfer.
+- **Analytics/tracking**: this app does not use cookies, analytics, or
+  tracking of any kind beyond the single session cookie described above.
+- **Third parties**: no data is shared with any party other than the source
+  and destination Sitecore environments you explicitly configure.
+
+If you have questions about this policy, contact the maintainers of this
+repository.
