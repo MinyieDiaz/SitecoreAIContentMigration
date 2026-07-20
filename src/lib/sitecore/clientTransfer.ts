@@ -135,12 +135,13 @@ export async function saveChunk(
   transferId: string,
   chunksetId: string,
   chunkId: number,
-  data: Blob
+  data: Blob,
+  isMedia: boolean
 ): Promise<void> {
   const result = await client.mutate("xmc.contentTransfer.saveChunk", {
     params: {
       path: { transferId, chunksetId, chunkId },
-      query: { sitecoreContextId },
+      query: { sitecoreContextId, isMedia },
       body: data,
     },
   });

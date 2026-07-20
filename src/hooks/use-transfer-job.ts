@@ -18,6 +18,12 @@ function isJobComplete(job: TransferJob): boolean {
   return job.status === "done" || job.status === "failed";
 }
 
+const MEDIA_LIBRARY_PATH_PREFIX = "/sitecore/media library/";
+
+function isMediaItemPath(path: string): boolean {
+  return path.toLowerCase().startsWith(MEDIA_LIBRARY_PATH_PREFIX);
+}
+
 // Advances the job by exactly one unit of work (one chunk, one chunk-set
 // completion, one poll), mirroring the step-per-call shape the old server-side
 // orchestrator used -- kept the same even though there's no longer an HTTP
@@ -88,11 +94,13 @@ async function stepTransferringChunks(
     return;
   }
 
-  const pendingChunkSet = job.chunkSets.find((chunkSet) => !chunkSet.completed);
-  if (!pendingChunkSet) {
+  const pendingChunkSetIndex = job.chunkSets.findIndex((chunkSet) => !chunkSet.completed);
+  if (pendingChunkSetIndex === -1) {
     job.status = "consuming";
     return;
   }
+  const pendingChunkSet = job.chunkSets[pendingChunkSetIndex];
+  const isMedia = isMediaItemPath(job.items[pendingChunkSetIndex].path);
 
   if (pendingChunkSet.chunksTransferred < pendingChunkSet.chunkCount) {
     const chunkId = pendingChunkSet.chunksTransferred;
@@ -109,7 +117,8 @@ async function stepTransferringChunks(
       transferId,
       pendingChunkSet.chunkSetId,
       chunkId,
-      chunk
+      chunk,
+      isMedia
     );
     pendingChunkSet.chunksTransferred += 1;
     return;
