@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type { ClientSDK } from "@sitecore-marketplace-sdk/client";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DEFAULT_ROOT_PATH, type SiteSummary, type TreeNode as TreeNodeData } from "@/lib/types";
 import { getItemChildren, listSites } from "@/lib/sitecore/xmcAuthoring";
@@ -17,6 +18,9 @@ interface ContentTreeProps {
 
 export function ContentTree({ client, sitecoreContextId, isSelected, onToggle }: ContentTreeProps) {
   const [rootNodes, setRootNodes] = useState<TreeNodeData[] | null>(null);
+  const [rootCursor, setRootCursor] = useState<string | null>(null);
+  const [rootHasNextPage, setRootHasNextPage] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [sites, setSites] = useState<SiteSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -27,12 +31,14 @@ export function ContentTree({ client, sitecoreContextId, isSelected, onToggle }:
       setError(null);
       setRootNodes(null);
       try {
-        const [children, siteList] = await Promise.all([
+        const [page, siteList] = await Promise.all([
           getItemChildren(client, sitecoreContextId, DEFAULT_ROOT_PATH),
           listSites(client, sitecoreContextId).catch(() => []),
         ]);
         if (!cancelled) {
-          setRootNodes(children);
+          setRootNodes(page.nodes);
+          setRootCursor(page.endCursor);
+          setRootHasNextPage(page.hasNextPage);
           setSites(siteList);
         }
       } catch (err) {
@@ -47,6 +53,21 @@ export function ContentTree({ client, sitecoreContextId, isSelected, onToggle }:
       cancelled = true;
     };
   }, [client, sitecoreContextId]);
+
+  const loadMore = async () => {
+    if (!rootCursor) return;
+    setLoadingMore(true);
+    try {
+      const page = await getItemChildren(client, sitecoreContextId, DEFAULT_ROOT_PATH, rootCursor);
+      setRootNodes((nodes) => [...(nodes ?? []), ...page.nodes]);
+      setRootCursor(page.endCursor);
+      setRootHasNextPage(page.hasNextPage);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load more items");
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   return (
     <div className="space-y-3">
@@ -81,6 +102,11 @@ export function ContentTree({ client, sitecoreContextId, isSelected, onToggle }:
             onToggle={onToggle}
           />
         ))}
+        {rootHasNextPage && (
+          <Button variant="ghost" size="sm" onClick={loadMore} disabled={loadingMore}>
+            {loadingMore ? "Loading…" : "Load more"}
+          </Button>
+        )}
       </div>
     </div>
   );

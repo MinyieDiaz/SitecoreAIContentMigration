@@ -23,8 +23,11 @@ interface TreeNodeProps {
 export function TreeNode({ client, sitecoreContextId, node, depth, isSelected, onToggle }: TreeNodeProps) {
   const [expanded, setExpanded] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [children, setChildren] = useState<TreeNodeData[] | null>(null);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [hasNextPage, setHasNextPage] = useState(false);
 
   const handleExpand = async () => {
     if (!node.hasChildren) return;
@@ -40,12 +43,29 @@ export function TreeNode({ client, sitecoreContextId, node, depth, isSelected, o
     setLoading(true);
     setError(null);
     try {
-      const nodes = await getItemChildren(client, sitecoreContextId, node.path);
-      setChildren(nodes);
+      const page = await getItemChildren(client, sitecoreContextId, node.path);
+      setChildren(page.nodes);
+      setCursor(page.endCursor);
+      setHasNextPage(page.hasNextPage);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load children");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleLoadMore = async () => {
+    if (!cursor) return;
+    setLoadingMore(true);
+    try {
+      const page = await getItemChildren(client, sitecoreContextId, node.path, cursor);
+      setChildren((existing) => [...(existing ?? []), ...page.nodes]);
+      setCursor(page.endCursor);
+      setHasNextPage(page.hasNextPage);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load more children");
+    } finally {
+      setLoadingMore(false);
     }
   };
 
@@ -114,6 +134,13 @@ export function TreeNode({ client, sitecoreContextId, node, depth, isSelected, o
               onToggle={onToggle}
             />
           ))}
+          {hasNextPage && (
+            <div style={{ paddingLeft: `${(depth + 1) * 1.25}rem` }}>
+              <Button variant="ghost" size="sm" onClick={handleLoadMore} disabled={loadingMore}>
+                {loadingMore ? "Loading…" : "Load more"}
+              </Button>
+            </div>
+          )}
         </div>
       )}
     </div>

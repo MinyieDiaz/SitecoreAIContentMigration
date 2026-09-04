@@ -24,19 +24,34 @@ const SITES_QUERY = `
   }
 `;
 
+// `children` is paginated by the Authoring GraphQL API -- with no `first`
+// passed, the server applies its own default page size, which is what capped
+// the content tree at 50 items regardless of how many children an item
+// actually had. `first`/`after`/`pageInfo { hasNextPage, endCursor }` is the
+// standard Relay-style connection shape Sitecore's GraphQL APIs use elsewhere;
+// this isn't independently confirmed for this specific field (the SDK's
+// xmc.authoring.graphql bridge is a raw untyped passthrough with no local
+// schema to check against), so a wrong argument name here will surface as a
+// loud GraphQL error rather than a silent bad read.
+const PAGE_SIZE = 100;
+
 const CHILDREN_QUERY = `
-  query ItemChildren($path: String!) {
+  query ItemChildren($path: String!, $after: String) {
     item(where: { path: $path, database: "master" }) {
       itemId
       name
       path
       hasChildren
-      children {
+      children(first: ${PAGE_SIZE}, after: $after) {
         nodes {
           itemId
           name
           path
           hasChildren
+        }
+        pageInfo {
+          hasNextPage
+          endCursor
         }
       }
     }
@@ -90,23 +105,34 @@ export async function listSites(client: ClientSDK, sitecoreContextId: string): P
   return data.sites.map((site) => ({ name: site.name, rootPath: DEFAULT_ROOT_PATH }));
 }
 
+export interface ItemChildrenPage {
+  nodes: TreeNode[];
+  hasNextPage: boolean;
+  endCursor: string | null;
+}
+
 export async function getItemChildren(
   client: ClientSDK,
   sitecoreContextId: string,
-  path: string
-): Promise<TreeNode[]> {
+  path: string,
+  after?: string
+): Promise<ItemChildrenPage> {
   const data = await executeAuthoringGraphQL<{
     item: {
       itemId: string;
       name: string;
       path: string;
       hasChildren: boolean;
-      children: { nodes: TreeNode[] };
+      children: { nodes: TreeNode[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } };
     } | null;
-  }>(client, sitecoreContextId, CHILDREN_QUERY, { path });
+  }>(client, sitecoreContextId, CHILDREN_QUERY, { path, after });
 
   if (!data.item) {
     throw new GraphQLRequestError(`Item not found at path "${path}"`);
   }
-  return data.item.children.nodes;
+  return {
+    nodes: data.item.children.nodes,
+    hasNextPage: data.item.children.pageInfo.hasNextPage,
+    endCursor: data.item.children.pageInfo.endCursor,
+  };
 }
