@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "sitecore-documentation-docs": {
+      "type": "http",
+      "url": "https://sitecore.mcp.kapa.ai"
+    }
+  }
+}

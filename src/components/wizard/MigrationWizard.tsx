@@ -23,6 +23,10 @@ export function MigrationWizard() {
   const [selections, setSelections] = useState<SelectedItem[]>([]);
   const [source, setSource] = useState<ResourceAccessEntry | null>(null);
   const [destination, setDestination] = useState<ResourceAccessEntry | null>(null);
+  const [globalScope, setGlobalScope] = useState<SelectedItem["scope"]>("SingleItem");
+  const [globalMergeStrategy, setGlobalMergeStrategy] = useState<SelectedItem["mergeStrategy"]>(
+    "OverrideExistingItem"
+  );
 
   const handleToggle = (node: TreeNode, checked: boolean) => {
     setSelections((previous) => {
@@ -38,8 +42,8 @@ export function MigrationWizard() {
           itemId: node.itemId,
           path: node.path,
           name: node.name,
-          scope: "SingleItem",
-          mergeStrategy: "OverrideExistingItem",
+          scope: globalScope,
+          mergeStrategy: globalMergeStrategy,
         },
       ];
     });
@@ -49,6 +53,12 @@ export function MigrationWizard() {
     setSelections((previous) =>
       previous.map((item) => (item.path === path ? { ...item, ...patch } : item))
     );
+  };
+
+  const handleApplyToAll = (patch: Partial<Pick<SelectedItem, "scope" | "mergeStrategy">>) => {
+    if (patch.scope) setGlobalScope(patch.scope);
+    if (patch.mergeStrategy) setGlobalMergeStrategy(patch.mergeStrategy);
+    setSelections((previous) => previous.map((item) => ({ ...item, ...patch })));
   };
 
   return (
@@ -73,8 +83,11 @@ export function MigrationWizard() {
           client={client}
           sitecoreContextId={getSitecoreContextId(source)}
           selections={selections}
+          globalScope={globalScope}
+          globalMergeStrategy={globalMergeStrategy}
           onToggle={handleToggle}
           onUpdate={handleUpdate}
+          onApplyToAll={handleApplyToAll}
           onBack={() => setCurrentStep(0)}
           onContinue={() => setCurrentStep(2)}
         />
