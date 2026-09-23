@@ -14,6 +14,7 @@ export interface EnvironmentConnection {
 export interface SessionData {
   source?: EnvironmentConnection;
   destination?: EnvironmentConnection;
+  installTarget?: EnvironmentConnection;
 }
 
 function requireSessionSecret(): string {

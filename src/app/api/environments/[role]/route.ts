@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { fetchClientCredentialsToken, normalizeHost } from "@/lib/sitecore/auth";
 import { getSession, type Role } from "@/lib/session";
+import { ROLES } from "@/lib/types";
 
 function parseRole(value: string): Role | null {
-  return value === "source" || value === "destination" ? value : null;
+  return (ROLES as readonly string[]).includes(value) ? (value as Role) : null;
 }
 
 export async function POST(
@@ -12,7 +13,7 @@ export async function POST(
 ) {
   const role = parseRole((await params).role);
   if (!role) {
-    return NextResponse.json({ error: "Role must be 'source' or 'destination'" }, { status: 400 });
+    return NextResponse.json({ error: `Role must be one of: ${ROLES.join(", ")}` }, { status: 400 });
   }
 
   let body: { host?: string; clientId?: string; clientSecret?: string };
@@ -56,7 +57,7 @@ export async function DELETE(
 ) {
   const role = parseRole((await params).role);
   if (!role) {
-    return NextResponse.json({ error: "Role must be 'source' or 'destination'" }, { status: 400 });
+    return NextResponse.json({ error: `Role must be one of: ${ROLES.join(", ")}` }, { status: 400 });
   }
 
   const session = await getSession();

@@ -3,17 +3,10 @@
 import { Button } from "@/components/ui/button";
 import { EmptyStates } from "@/components/ui/empty-states";
 import { ErrorStates } from "@/components/ui/error-states";
-import { Field, FieldContent, FieldGroup, FieldLabel } from "@/components/ui/field";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { EnvironmentSelect } from "@/components/environments/EnvironmentSelect";
 import { useMarketplaceContext } from "@/components/marketplace/MarketplaceProvider";
-import { getEnvironmentLabel, getSitecoreContextId } from "@/lib/sitecore/xmcContext";
+import { getSitecoreContextId } from "@/lib/sitecore/xmcContext";
 import type { ResourceAccessEntry } from "@/hooks/use-marketplace-client";
 
 interface ConnectStepProps {
@@ -111,59 +104,21 @@ export function ConnectStep({
       {heading}
 
       <div className="grid gap-4 md:grid-cols-2">
-        <FieldGroup className="mt-0">
-          <Field>
-            <FieldContent>
-              <FieldLabel>Source environment</FieldLabel>
-            </FieldContent>
-            <Select
-              value={source ? getSitecoreContextId(source) : ""}
-              onValueChange={(contextId) =>
-                onSelectSource(
-                  resourceAccess.find((entry) => getSitecoreContextId(entry) === contextId) ?? null
-                )
-              }
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Select the environment to read from" />
-              </SelectTrigger>
-              <SelectContent>
-                {resourceAccess.map((entry) => (
-                  <SelectItem key={getSitecoreContextId(entry)} value={getSitecoreContextId(entry)}>
-                    {getEnvironmentLabel(entry)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </Field>
-        </FieldGroup>
+        <EnvironmentSelect
+          label="Source environment"
+          placeholder="Select the environment to read from"
+          resourceAccess={resourceAccess}
+          value={source}
+          onChange={onSelectSource}
+        />
 
-        <FieldGroup className="mt-0">
-          <Field>
-            <FieldContent>
-              <FieldLabel>Destination environment</FieldLabel>
-            </FieldContent>
-            <Select
-              value={destination ? getSitecoreContextId(destination) : ""}
-              onValueChange={(contextId) =>
-                onSelectDestination(
-                  resourceAccess.find((entry) => getSitecoreContextId(entry) === contextId) ?? null
-                )
-              }
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Select the environment to write to" />
-              </SelectTrigger>
-              <SelectContent>
-                {resourceAccess.map((entry) => (
-                  <SelectItem key={getSitecoreContextId(entry)} value={getSitecoreContextId(entry)}>
-                    {getEnvironmentLabel(entry)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </Field>
-        </FieldGroup>
+        <EnvironmentSelect
+          label="Destination environment"
+          placeholder="Select the environment to write to"
+          resourceAccess={resourceAccess}
+          value={destination}
+          onChange={onSelectDestination}
+        />
       </div>
 
       {sameEntry && (

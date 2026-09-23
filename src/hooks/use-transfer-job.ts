@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback } from "react";
 import type { ClientSDK } from "@sitecore-marketplace-sdk/client";
 import * as clientTransfer from "@/lib/sitecore/clientTransfer";
+import { useStepLoop } from "@/hooks/use-step-loop";
 import type { ChunkSetProgress, SelectedItem, TransferJob } from "@/lib/types";
 
 function createJob(selections: SelectedItem[]): TransferJob {
@@ -161,59 +162,27 @@ async function stepConsuming(
 }
 
 export function useTransferJob(client: ClientSDK, sourceContextId: string, destinationContextId: string) {
-  const [job, setJob] = useState<TransferJob | null>(null);
-  const [running, setRunning] = useState(false);
-  const cancelledRef = useRef(false);
-
-  useEffect(
-    () => () => {
-      cancelledRef.current = true;
-    },
-    []
-  );
-
-  const runLoop = useCallback(
-    async (initialJob: TransferJob) => {
-      cancelledRef.current = false;
-      setRunning(true);
-      try {
-        let current = initialJob;
-        while (!cancelledRef.current && !isJobComplete(current)) {
-          current = await stepJob(client, current, sourceContextId, destinationContextId);
-          setJob(current);
-        }
-      } finally {
-        setRunning(false);
-      }
-    },
+  const step = useCallback(
+    (job: TransferJob) => stepJob(client, job, sourceContextId, destinationContextId),
     [client, sourceContextId, destinationContextId]
   );
+  const { job, running, run, cancel } = useStepLoop<TransferJob>(step, isJobComplete);
 
   const start = useCallback(
-    (selections: SelectedItem[]) => {
-      const newJob = createJob(selections);
-      setJob(newJob);
-      runLoop(newJob);
-    },
-    [runLoop]
+    (selections: SelectedItem[]) => run(createJob(selections)),
+    [run]
   );
 
   const retry = useCallback(() => {
     if (!job) return;
-    const resetJob: TransferJob = {
+    run({
       ...job,
       status: "pending",
       error: undefined,
       sourceTransferId: undefined,
       chunkSets: undefined,
-    };
-    setJob(resetJob);
-    runLoop(resetJob);
-  }, [job, runLoop]);
-
-  const cancel = useCallback(() => {
-    cancelledRef.current = true;
-  }, []);
+    });
+  }, [job, run]);
 
   return { job, running, start, retry, cancel };
 }

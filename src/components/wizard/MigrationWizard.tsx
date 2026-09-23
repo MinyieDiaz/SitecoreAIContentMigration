@@ -3,9 +3,9 @@
 import { useState } from "react";
 import { Stepper } from "@/components/ui/stepper";
 import { useMarketplaceContext } from "@/components/marketplace/MarketplaceProvider";
+import { useContentSelection } from "@/hooks/use-content-selection";
 import { getSitecoreContextId } from "@/lib/sitecore/xmcContext";
 import type { ResourceAccessEntry } from "@/hooks/use-marketplace-client";
-import type { SelectedItem, TreeNode } from "@/lib/types";
 import { ConnectStep } from "./ConnectStep";
 import { ConnectionSummary } from "./ConnectionSummary";
 import { SelectContentStep } from "./SelectContentStep";
@@ -20,46 +20,10 @@ const STEPS = [
 export function MigrationWizard() {
   const { client } = useMarketplaceContext();
   const [currentStep, setCurrentStep] = useState(0);
-  const [selections, setSelections] = useState<SelectedItem[]>([]);
   const [source, setSource] = useState<ResourceAccessEntry | null>(null);
   const [destination, setDestination] = useState<ResourceAccessEntry | null>(null);
-  const [globalScope, setGlobalScope] = useState<SelectedItem["scope"]>("SingleItem");
-  const [globalMergeStrategy, setGlobalMergeStrategy] = useState<SelectedItem["mergeStrategy"]>(
-    "OverrideExistingItem"
-  );
-
-  const handleToggle = (node: TreeNode, checked: boolean) => {
-    setSelections((previous) => {
-      if (!checked) {
-        return previous.filter((item) => item.path !== node.path);
-      }
-      if (previous.some((item) => item.path === node.path)) {
-        return previous;
-      }
-      return [
-        ...previous,
-        {
-          itemId: node.itemId,
-          path: node.path,
-          name: node.name,
-          scope: globalScope,
-          mergeStrategy: globalMergeStrategy,
-        },
-      ];
-    });
-  };
-
-  const handleUpdate = (path: string, patch: Partial<Pick<SelectedItem, "scope" | "mergeStrategy">>) => {
-    setSelections((previous) =>
-      previous.map((item) => (item.path === path ? { ...item, ...patch } : item))
-    );
-  };
-
-  const handleApplyToAll = (patch: Partial<Pick<SelectedItem, "scope" | "mergeStrategy">>) => {
-    if (patch.scope) setGlobalScope(patch.scope);
-    if (patch.mergeStrategy) setGlobalMergeStrategy(patch.mergeStrategy);
-    setSelections((previous) => previous.map((item) => ({ ...item, ...patch })));
-  };
+  const { selections, globalScope, globalMergeStrategy, handleToggle, handleUpdate, handleApplyToAll } =
+    useContentSelection();
 
   return (
     <div className="mx-auto w-full max-w-5xl space-y-8">

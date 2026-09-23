@@ -5,7 +5,7 @@ import { mdiCheckCircle } from "@mdi/js";
 import { toast } from "sonner";
 import { Icon } from "@/lib/icon";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field, FieldContent, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -60,7 +60,7 @@ export function EnvironmentCard({
             </Badge>
           )}
         </div>
-        <p className="text-sm text-muted-foreground">{description}</p>
+        <CardDescription>{description}</CardDescription>
       </CardHeader>
       <CardContent>
         {status.connected ? (

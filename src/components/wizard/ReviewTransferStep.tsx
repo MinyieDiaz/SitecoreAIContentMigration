@@ -5,8 +5,6 @@ import Link from "next/link";
 import { toast } from "sonner";
 import type { ClientSDK } from "@sitecore-marketplace-sdk/client";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
 import {
   Table,
   TableBody,
@@ -15,36 +13,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { JobProgress } from "@/components/jobs/JobProgress";
 import { MERGE_STRATEGY_LABELS, SCOPE_LABELS } from "@/lib/labels";
+import { transferJobProgress } from "@/lib/jobs";
 import { useTransferJob } from "@/hooks/use-transfer-job";
-import type { JobStatus, SelectedItem, TransferJob } from "@/lib/types";
-
-const STATUS_LABEL: Record<JobStatus, string> = {
-  pending: "Pending",
-  "transferring-chunks": "Transferring",
-  consuming: "Consuming",
-  done: "Submitted",
-  failed: "Failed",
-};
-
-const STATUS_COLOR: Record<JobStatus, "neutral" | "primary" | "success" | "danger"> = {
-  pending: "neutral",
-  "transferring-chunks": "primary",
-  consuming: "primary",
-  done: "success",
-  failed: "danger",
-};
-
-function jobProgress(job: TransferJob | null): number {
-  if (!job) return 0;
-  if (job.status === "done") return 100;
-  if (job.status === "pending") return 0;
-  if (!job.chunkSets?.length) return 10;
-  const total = job.chunkSets.reduce((sum, chunkSet) => sum + chunkSet.chunkCount, 0);
-  const transferred = job.chunkSets.reduce((sum, chunkSet) => sum + chunkSet.chunksTransferred, 0);
-  if (total === 0) return 50;
-  return Math.round((transferred / total) * 80) + 10;
-}
+import type { SelectedItem, TransferJob } from "@/lib/types";
 
 interface ReviewTransferStepProps {
   client: ClientSDK;
@@ -86,18 +59,12 @@ export function ReviewTransferStep({
       </div>
 
       {job && (
-        <div className="space-y-2 rounded-md border p-4">
-          <div className="flex items-center justify-between">
-            <Badge colorScheme={STATUS_COLOR[job.status]}>{STATUS_LABEL[job.status]}</Badge>
-            {job.status === "failed" && (
-              <Button variant="outline" size="sm" onClick={retry}>
-                Retry
-              </Button>
-            )}
-          </div>
-          <Progress value={jobProgress(job)} />
-          {job.status === "failed" && job.error && <p className="text-sm text-danger-fg">{job.error}</p>}
-          {job.status === "done" && (
+        <JobProgress
+          status={job.status}
+          progress={transferJobProgress(job)}
+          error={job.error}
+          onRetry={retry}
+          doneContent={
             <p className="text-sm text-muted-foreground">
               All items were submitted to the destination. Sitecore consumes each one asynchronously, so it can
               take a few moments to finish landing — check the{" "}
@@ -106,8 +73,8 @@ export function ReviewTransferStep({
               </Link>{" "}
               for live status.
             </p>
-          )}
-        </div>
+          }
+        />
       )}
 
       <Table>

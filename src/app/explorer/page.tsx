@@ -1,11 +1,34 @@
 "use client";
 
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { mdiDatabaseOutline, mdiHistory, mdiSwapHorizontal } from "@mdi/js";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
+import { CardTabsList, CardTabsTrigger } from "@/components/common/CardTabs";
 import { BlobManager } from "@/components/explorer/BlobManager";
 import { HistoryTable } from "@/components/explorer/HistoryTable";
 import { TransfersPanel } from "@/components/explorer/TransfersPanel";
 import { EnvironmentCard } from "@/components/wizard/EnvironmentCard";
 import { useEnvironments } from "@/hooks/use-environments";
+
+const TABS = [
+  {
+    value: "transfers",
+    icon: mdiSwapHorizontal,
+    title: "Transfers",
+    description: "Item Transfer sources currently in flight on this environment",
+  },
+  {
+    value: "history",
+    icon: mdiHistory,
+    title: "History",
+    description: "Past transfers and their outcome",
+  },
+  {
+    value: "blobs",
+    icon: mdiDatabaseOutline,
+    title: "Blobs",
+    description: "Raw content-transfer blobs uploaded to this environment",
+  },
+] as const;
 
 export default function ExplorerPage() {
   const { destination, loading, connect, disconnect } = useEnvironments();
@@ -38,11 +61,17 @@ export default function ExplorerPage() {
 
       {destination.connected && (
         <Tabs defaultValue="transfers">
-          <TabsList>
-            <TabsTrigger value="transfers">Transfers</TabsTrigger>
-            <TabsTrigger value="history">History</TabsTrigger>
-            <TabsTrigger value="blobs">Blobs</TabsTrigger>
-          </TabsList>
+          <CardTabsList columns={3}>
+            {TABS.map((tab) => (
+              <CardTabsTrigger
+                key={tab.value}
+                value={tab.value}
+                icon={tab.icon}
+                title={tab.title}
+                description={tab.description}
+              />
+            ))}
+          </CardTabsList>
           <TabsContent value="transfers">
             <TransfersPanel />
           </TabsContent>
