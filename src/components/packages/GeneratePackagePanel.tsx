@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import type { ClientSDK } from "@sitecore-marketplace-sdk/client";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { EmptyStates } from "@/components/ui/empty-states";
 import { ErrorStates } from "@/components/ui/error-states";
@@ -85,6 +86,15 @@ export function GeneratePackagePanel() {
 
   return (
     <div className="space-y-6">
+      <Alert variant="warning">
+        <AlertTitle>Don&apos;t see your download?</AlertTitle>
+        <AlertDescription>
+          Update the Content Migration app in the Sitecore Cloud Portal dashboard&apos;s <strong>My Apps</strong>{" "}
+          tab — this app&apos;s permissions were updated to allow file downloads, and installations from before
+          that change won&apos;t have it granted. Without it, the download silently does nothing.
+        </AlertDescription>
+      </Alert>
+
       <div className="max-w-md">
         <EnvironmentSelect
           label="Source environment"
