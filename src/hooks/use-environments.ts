@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { Role } from "@/lib/types";
+import { ROLES, type Role } from "@/lib/types";
 
 export interface EnvironmentStatus {
   connected: boolean;
@@ -9,15 +9,11 @@ export interface EnvironmentStatus {
   expiresAt?: number;
 }
 
-export interface EnvironmentsState {
-  source: EnvironmentStatus;
-  destination: EnvironmentStatus;
-}
+export type EnvironmentsState = Record<Role, EnvironmentStatus>;
 
-const initialState: EnvironmentsState = {
-  source: { connected: false },
-  destination: { connected: false },
-};
+const initialState: EnvironmentsState = Object.fromEntries(
+  ROLES.map((role) => [role, { connected: false }])
+) as EnvironmentsState;
 
 export function useEnvironments() {
   const [state, setState] = useState<EnvironmentsState>(initialState);

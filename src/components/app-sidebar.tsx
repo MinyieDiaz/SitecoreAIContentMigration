@@ -1,6 +1,6 @@
 "use client";
 
-import { mdiCompassOutline, mdiSwapHorizontal } from "@mdi/js";
+import { mdiCompassOutline, mdiPackageVariantClosed, mdiSwapHorizontal } from "@mdi/js";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Icon } from "@/lib/icon";
@@ -18,6 +18,7 @@ import {
 
 const NAV_ITEMS = [
   { href: "/", label: "Migration Wizard", icon: mdiSwapHorizontal },
+  { href: "/packages", label: "Packages", icon: mdiPackageVariantClosed },
   { href: "/explorer", label: "Explorer", icon: mdiCompassOutline },
 ];
 

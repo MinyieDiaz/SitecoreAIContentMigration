@@ -1,4 +1,9 @@
-export type Role = "source" | "destination";
+// The wizard's source/destination roles, plus installTarget for Packages'
+// credentialed install (see docs/plans/credentialed-install.md) -- kept
+// separate from "destination" so connecting in Packages can't silently
+// re-point the Explorer, which reads "destination" too.
+export const ROLES = ["source", "destination", "installTarget"] as const;
+export type Role = (typeof ROLES)[number];
 
 export const DEFAULT_ROOT_PATH = "/sitecore";
 
@@ -56,6 +61,16 @@ export interface ChunkSetProgress {
   completed: boolean;
   blobName?: string;
   consumeRequested?: boolean;
+  // Only populated by the package hooks, which (unlike the wizard) need to
+  // carry isMedia from generate time through to install time instead of
+  // re-deriving it from a live item path -- see PackageChunkSetManifest.
+  isMedia?: boolean;
+  // Only populated by the credentialed install destination -- the raw Item
+  // Transfer API's startConsume returns a `location` header carrying this,
+  // unlike the SDK path's consumeFile which exposes no response at all (see
+  // docs/plans/credentialed-install.md). Null means consume succeeded but the
+  // header was missing; undefined means this chunk set hasn't consumed yet.
+  sourceName?: string | null;
 }
 
 export interface TransferJob {
@@ -64,6 +79,57 @@ export interface TransferJob {
   items: SelectedItem[];
   status: JobStatus;
   sourceTransferId?: string;
+  chunkSets?: ChunkSetProgress[];
+  error?: string;
+}
+
+// Bumped whenever the package zip layout or manifest shape changes in a way
+// that breaks reading older packages -- readPackageArchive refuses anything
+// else rather than guessing at a shape it wasn't written for.
+export const PACKAGE_FORMAT_VERSION = 1;
+
+// isMedia is resolved at generate time (from the item path, same as the
+// wizard's stepTransferringChunks) and baked into the manifest, because at
+// install time the originating item path is only known through the manifest
+// itself -- there is nothing left to re-derive it from.
+export interface PackageChunkSetManifest {
+  chunkSetId: string;
+  chunkCount: number;
+  totalItemCount: number;
+  isMedia: boolean;
+  itemIndex: number;
+}
+
+export interface PackageManifest {
+  formatVersion: number;
+  packageId: string;
+  createdAt: string;
+  sourceEnvironment: string;
+  // Reused verbatim at install time -- the destination blob is named
+  // contentTransfer-{transferId}-{chunkSetId}.raif, so keeping the original
+  // id keeps the archived chunk bytes and their addressing consistent.
+  transferId: string;
+  items: SelectedItem[];
+  chunkSets: PackageChunkSetManifest[];
+}
+
+export type PackageJobStatus = "pending" | "transferring-chunks" | "packaging" | "consuming" | "done" | "failed";
+
+export interface GeneratePackageJob {
+  jobId: string;
+  createdAt: number;
+  items: SelectedItem[];
+  status: Exclude<PackageJobStatus, "consuming">;
+  sourceTransferId?: string;
+  chunkSets?: ChunkSetProgress[];
+  error?: string;
+}
+
+export interface InstallPackageJob {
+  jobId: string;
+  createdAt: number;
+  manifest: PackageManifest;
+  status: Exclude<PackageJobStatus, "packaging">;
   chunkSets?: ChunkSetProgress[];
   error?: string;
 }

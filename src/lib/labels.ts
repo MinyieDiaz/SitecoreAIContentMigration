@@ -1,4 +1,4 @@
-import type { MergeStrategy, TransferScope } from "@/lib/types";
+import type { MergeStrategy, PackageJobStatus, TransferScope } from "@/lib/types";
 
 export const SCOPE_LABELS: Record<TransferScope, string> = {
   SingleItem: "This item only",
@@ -10,4 +10,28 @@ export const MERGE_STRATEGY_LABELS: Record<MergeStrategy, string> = {
   KeepExistingItem: "Keep existing item",
   LatestWin: "Latest wins",
   OverrideExistingTree: "Override existing tree",
+};
+
+// Shared across every client-side job hook (transfer, generate package,
+// install package) -- PackageJobStatus is the superset ("packaging" only
+// applies to generate, "consuming" only to transfer/install) so one map
+// covers all three rather than duplicating pending/transferring-chunks/done/
+// failed per flow. The specific outcome ("submitted" vs "downloaded") is left
+// to each JobProgress caller's doneContent, not the badge.
+export const JOB_STATUS_LABELS: Record<PackageJobStatus, string> = {
+  pending: "Pending",
+  "transferring-chunks": "Transferring",
+  packaging: "Packaging",
+  consuming: "Consuming",
+  done: "Done",
+  failed: "Failed",
+};
+
+export const JOB_STATUS_COLORS: Record<PackageJobStatus, "neutral" | "primary" | "success" | "danger"> = {
+  pending: "neutral",
+  "transferring-chunks": "primary",
+  packaging: "primary",
+  consuming: "primary",
+  done: "success",
+  failed: "danger",
 };
