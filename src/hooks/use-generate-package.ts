@@ -6,13 +6,7 @@ import * as clientTransfer from "@/lib/sitecore/clientTransfer";
 import { useStepLoop } from "@/hooks/use-step-loop";
 import { PackageArchiveWriter, downloadBlob, packageFileName } from "@/lib/packages/archive";
 import { PACKAGE_FORMAT_VERSION } from "@/lib/types";
-import type { ChunkSetProgress, GeneratePackageJob, PackageChunkSetManifest, PackageManifest, SelectedItem } from "@/lib/types";
-
-const MEDIA_LIBRARY_PATH_PREFIX = "/sitecore/media library/";
-
-function isMediaItemPath(path: string): boolean {
-  return path.toLowerCase().startsWith(MEDIA_LIBRARY_PATH_PREFIX);
-}
+import type { GeneratePackageJob, PackageChunkSetManifest, PackageManifest, SelectedItem } from "@/lib/types";
 
 function createJob(items: SelectedItem[]): GeneratePackageJob {
   return {
@@ -27,17 +21,8 @@ function isJobComplete(job: GeneratePackageJob): boolean {
   return job.status === "done" || job.status === "failed";
 }
 
-// Only getTransferStatus returns totalItemCount per chunk set -- kept out of
-// ChunkSetProgress (which the wizard's job also uses) and tracked here
-// instead, since it's only needed once, when building the manifest.
-interface ChunkSetMeta {
-  chunkSetId: string;
-  totalItemCount: number;
-}
-
 export function useGeneratePackage(client: ClientSDK, sourceContextId: string, sourceEnvironmentLabel: string) {
   const writerRef = useRef<PackageArchiveWriter | null>(null);
-  const chunkSetMetaRef = useRef<ChunkSetMeta[] | null>(null);
 
   const step = useCallback(
     async (job: GeneratePackageJob): Promise<GeneratePackageJob> => {
@@ -56,31 +41,33 @@ export function useGeneratePackage(client: ClientSDK, sourceContextId: string, s
               })),
             });
             next.sourceTransferId = transferId;
-            next.status = "transferring-chunks";
+            next.preparingSince = Date.now();
+            next.status = "preparing";
             writerRef.current = new PackageArchiveWriter();
+            break;
+          }
+
+          case "preparing": {
+            const transferId = next.sourceTransferId;
+            if (!transferId) throw new Error("Missing source transfer ID");
+
+            const chunkSets = await clientTransfer.pollPreparedChunkSets(
+              client,
+              sourceContextId,
+              transferId,
+              next.items.map((item) => item.path),
+              next.preparingSince ?? Date.now()
+            );
+            if (!chunkSets) break;
+            next.chunkSets = chunkSets;
+            next.status = "transferring-chunks";
             break;
           }
 
           case "transferring-chunks": {
             const transferId = next.sourceTransferId;
             if (!transferId) throw new Error("Missing source transfer ID");
-
-            if (!next.chunkSets) {
-              const status = await clientTransfer.getTransferStatus(client, sourceContextId, transferId);
-              next.chunkSets = status.chunkSets.map(
-                (chunkSet): ChunkSetProgress => ({
-                  chunkSetId: chunkSet.chunkSetId,
-                  chunkCount: chunkSet.chunkCount,
-                  chunksTransferred: 0,
-                  completed: false,
-                })
-              );
-              chunkSetMetaRef.current = status.chunkSets.map((chunkSet) => ({
-                chunkSetId: chunkSet.chunkSetId,
-                totalItemCount: chunkSet.totalItemCount,
-              }));
-              break;
-            }
+            if (!next.chunkSets) throw new Error("Missing chunk set metadata");
 
             const pendingIndex = next.chunkSets.findIndex((chunkSet) => !chunkSet.completed);
             if (pendingIndex === -1) {
@@ -102,7 +89,6 @@ export function useGeneratePackage(client: ClientSDK, sourceContextId: string, s
               if (!writerRef.current) throw new Error("Package writer was not initialized");
               writerRef.current.addChunk(pending.chunkSetId, chunkId, bytes);
               pending.chunksTransferred += 1;
-              pending.isMedia = isMediaItemPath(next.items[pendingIndex].path);
               break;
             }
 
@@ -114,20 +100,17 @@ export function useGeneratePackage(client: ClientSDK, sourceContextId: string, s
           }
 
           case "packaging": {
-            if (!next.chunkSets || !next.sourceTransferId || !writerRef.current || !chunkSetMetaRef.current) {
+            if (!next.chunkSets || !next.sourceTransferId || !writerRef.current) {
               throw new Error("Missing chunk set metadata");
             }
 
-            const chunkSets: PackageChunkSetManifest[] = next.chunkSets.map((chunkSet, itemIndex) => {
-              const meta = chunkSetMetaRef.current!.find((entry) => entry.chunkSetId === chunkSet.chunkSetId);
-              return {
-                chunkSetId: chunkSet.chunkSetId,
-                chunkCount: chunkSet.chunkCount,
-                totalItemCount: meta?.totalItemCount ?? 0,
-                isMedia: chunkSet.isMedia ?? false,
-                itemIndex,
-              };
-            });
+            const chunkSets: PackageChunkSetManifest[] = next.chunkSets.map((chunkSet, itemIndex) => ({
+              chunkSetId: chunkSet.chunkSetId,
+              chunkCount: chunkSet.chunkCount,
+              totalItemCount: chunkSet.totalItemCount ?? 0,
+              isMedia: chunkSet.isMedia ?? false,
+              itemIndex,
+            }));
 
             const manifest: PackageManifest = {
               formatVersion: PACKAGE_FORMAT_VERSION,

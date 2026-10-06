@@ -39,11 +39,12 @@ export function ReviewTransferStep({
 
   useEffect(() => {
     if (!job || !running) return;
-    if (job.status !== "done" && job.status !== "failed") return;
+    if (job.status !== "done" && job.status !== "done-with-errors" && job.status !== "failed") return;
     if (notifiedRef.current === job.status) return;
     notifiedRef.current = job.status;
     if (job.status === "failed") toast.error("Migration failed");
-    else toast.success("Items submitted for transfer");
+    else if (job.status === "done-with-errors") toast.warning("Migration finished with errors");
+    else toast.success("Migration complete");
   }, [job, running]);
 
   const handleStart = () => start(selections);
@@ -66,15 +67,45 @@ export function ReviewTransferStep({
           onRetry={retry}
           doneContent={
             <p className="text-sm text-muted-foreground">
-              All items were submitted to the destination. Sitecore consumes each one asynchronously, so it can
-              take a few moments to finish landing — check the{" "}
+              {job.chunkSets?.some((chunkSet) => chunkSet.consumeOutcome === "unconfirmed")
+                ? "Every part was submitted, but the destination didn't report an import status for all of them, so completion isn't confirmed. Check the "
+                : "The destination finished importing every part. See the "}
               <Link href="/explorer" className="underline">
                 Explorer
               </Link>{" "}
-              for live status.
+              for transfer status and history.
             </p>
           }
         />
+      )}
+
+      {/* Per chunk set, not per selection -- the source decides how selected items are grouped into parts. */}
+      {job?.chunkSets && (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Part</TableHead>
+              <TableHead>Items</TableHead>
+              <TableHead>Chunks</TableHead>
+              <TableHead>Destination</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {job.chunkSets.map((chunkSet, index) => (
+              <TableRow key={chunkSet.chunkSetId}>
+                <TableCell>
+                  {index + 1} of {job.chunkSets?.length}
+                </TableCell>
+                <TableCell>{chunkSet.totalItemCount ?? "—"}</TableCell>
+                <TableCell>
+                  {chunkSet.chunksTransferred} / {chunkSet.chunkCount}
+                </TableCell>
+                {/* Raw GetBlobState value, so an unexpected response shape is visible. */}
+                <TableCell>{chunkSet.destinationState ?? (chunkSet.consumeRequested ? "Submitted" : "—")}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
 
       <Table>

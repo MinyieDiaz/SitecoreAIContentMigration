@@ -35,35 +35,52 @@ export interface SelectedItem {
   mergeStrategy: MergeStrategy;
 }
 
-// "done" means every item's consume request was successfully submitted to the
-// destination -- not that the destination has confirmed it finished writing the
-// data. See the note on JobStatus below for why the job intentionally doesn't
-// wait for that confirmation.
-export type JobStatus = "pending" | "transferring-chunks" | "consuming" | "done" | "failed";
+// "done" means every .raif was either reported Transferred (via GetBlobState)
+// or submitted with no status available ("unconfirmed" -- Review says so);
+// "done-with-errors" means at least one finished as TransferredWithErrors --
+// partial success, details in the Explorer.
+export type JobStatus =
+  | "pending"
+  | "preparing"
+  | "transferring-chunks"
+  | "consuming"
+  | "done"
+  | "done-with-errors"
+  | "failed";
 
-// The Content Transfer API creates one chunk set per nominated data tree (i.e. one
-// per selected item), and each chunk set becomes its own .raif file that the Item
-// Transfer API consumes independently -- there is no batched "single blob" for a
-// multi-item transfer. ChunkSetProgress entries are index-aligned with
-// TransferJob.items: the confirmed OpenAPI spec doesn't echo back which item a
-// chunk set came from, so order-of-submission is the only correlation available.
+// "unconfirmed": the consume was accepted, but the destination never reported
+// a status for the .raif -- the pre-GetBlobState "submitted" behavior.
+export type ConsumeOutcome = "transferred" | "transferred-with-errors" | "error" | "unconfirmed";
+
+// The Content Transfer API splits a transfer into one or more chunk sets, and
+// each chunk set becomes its own .raif file that the Item Transfer API consumes
+// independently. Chunk sets are NOT one per selected item -- a live two-item
+// transfer came back as a single chunk set -- and the status response doesn't
+// say which items each one holds, so nothing here may assume chunkSets[i]
+// corresponds to items[i].
 //
 // consumeRequested (rather than a resolved destination source name): the
 // Marketplace SDK's `xmc.contentTransfer.consumeFile` has no response body and
 // no headers exposed to app code, unlike the raw Item Transfer API's `location`
-// header this app used to parse a `sourceName` out of. Nothing today actually
-// correlates a wizard job to a specific Explorer transfer row, so a boolean
-// "was consume requested" is all that's needed to gate the job as done.
+// header this app used to parse a `sourceName` out of. The outcome is tracked
+// by blobName instead, through GetBlobState (destinationState/consumeOutcome).
 export interface ChunkSetProgress {
   chunkSetId: string;
   chunkCount: number;
+  // From the source's status response once the transfer is prepared -- shown
+  // per chunk set on Review, and baked into package manifests.
+  totalItemCount?: number;
   chunksTransferred: number;
   completed: boolean;
   blobName?: string;
   consumeRequested?: boolean;
-  // Only populated by the package hooks, which (unlike the wizard) need to
-  // carry isMedia from generate time through to install time instead of
-  // re-deriving it from a live item path -- see PackageChunkSetManifest.
+  consumeStartedAt?: number;
+  // Latest raw state GetBlobState reported -- shown as-is on Review.
+  destinationState?: string;
+  // Set once the destination reaches a terminal state for this chunk set.
+  consumeOutcome?: ConsumeOutcome;
+  // Resolved once the source transfer is prepared (resolveChunkSetIsMedia in
+  // clientTransfer.ts); package manifests carry it through to install time.
   isMedia?: boolean;
   // Only populated by the credentialed install destination -- the raw Item
   // Transfer API's startConsume returns a `location` header carrying this,
@@ -79,6 +96,9 @@ export interface TransferJob {
   items: SelectedItem[];
   status: JobStatus;
   sourceTransferId?: string;
+  // When the "preparing" phase started -- bounds how long we wait for the
+  // source to finish building the transfer.
+  preparingSince?: number;
   chunkSets?: ChunkSetProgress[];
   error?: string;
 }
@@ -113,14 +133,23 @@ export interface PackageManifest {
   chunkSets: PackageChunkSetManifest[];
 }
 
-export type PackageJobStatus = "pending" | "transferring-chunks" | "packaging" | "consuming" | "done" | "failed";
+export type PackageJobStatus =
+  | "pending"
+  | "preparing"
+  | "transferring-chunks"
+  | "packaging"
+  | "consuming"
+  | "done"
+  | "done-with-errors"
+  | "failed";
 
 export interface GeneratePackageJob {
   jobId: string;
   createdAt: number;
   items: SelectedItem[];
-  status: Exclude<PackageJobStatus, "consuming">;
+  status: Exclude<PackageJobStatus, "consuming" | "done-with-errors">;
   sourceTransferId?: string;
+  preparingSince?: number;
   chunkSets?: ChunkSetProgress[];
   error?: string;
 }
@@ -129,7 +158,7 @@ export interface InstallPackageJob {
   jobId: string;
   createdAt: number;
   manifest: PackageManifest;
-  status: Exclude<PackageJobStatus, "packaging">;
+  status: Exclude<PackageJobStatus, "packaging" | "preparing" | "done-with-errors">;
   chunkSets?: ChunkSetProgress[];
   error?: string;
 }
