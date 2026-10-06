@@ -10,8 +10,9 @@ function chunkTransferFraction(chunkSets: ChunkSetProgress[] | undefined): numbe
   return total === 0 ? 0 : transferred / total;
 }
 
-// The last 10% tracks how many items the destination has finished importing.
-export function transferJobProgress(job: TransferJob | null): number {
+// Transfer and install jobs both end by importing chunk sets into the
+// destination; the last 10% tracks how many have finished importing.
+function chunkJobProgress(job: TransferJob | InstallPackageJob | null): number {
   if (!job) return 0;
   if (job.status === "done" || job.status === "done-with-errors") return 100;
   if (job.status === "pending") return 0;
@@ -19,6 +20,9 @@ export function transferJobProgress(job: TransferJob | null): number {
   const imported = job.chunkSets.filter((chunkSet) => chunkSet.consumeOutcome).length;
   return Math.round(chunkTransferFraction(job.chunkSets) * 80 + (imported / job.chunkSets.length) * 10) + 10;
 }
+
+export const transferJobProgress = chunkJobProgress;
+export const installPackageProgress = chunkJobProgress;
 
 export function generatePackageProgress(job: GeneratePackageJob | null): number {
   if (!job) return 0;
@@ -29,10 +33,3 @@ export function generatePackageProgress(job: GeneratePackageJob | null): number 
   return Math.round(chunkTransferFraction(job.chunkSets) * 80) + 10;
 }
 
-export function installPackageProgress(job: InstallPackageJob | null): number {
-  if (!job) return 0;
-  if (job.status === "done") return 100;
-  if (job.status === "pending") return 0;
-  if (!job.chunkSets?.length) return 10;
-  return Math.round(chunkTransferFraction(job.chunkSets) * 80) + 10;
-}

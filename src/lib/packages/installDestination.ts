@@ -1,11 +1,12 @@
 import type { ClientSDK } from "@sitecore-marketplace-sdk/client";
+import type { ConsumeDriver } from "@/lib/consume";
 import * as clientTransfer from "@/lib/sitecore/clientTransfer";
 
 // The destination side of an install job, extracted so useInstallPackage can
 // stay agnostic to how the destination is reached -- see
 // docs/plans/credentialed-install.md. One job loop, one progress model, one
 // panel; two drivers.
-export interface InstallDestination {
+export interface InstallDestination extends ConsumeDriver {
   saveChunk(
     transferId: string,
     chunkSetId: string,
@@ -14,10 +15,6 @@ export interface InstallDestination {
     isMedia: boolean
   ): Promise<void>;
   completeChunkSet(transferId: string, chunkSetId: string): Promise<{ blobName: string }>;
-  // sourceName is null on the SDK path (no response to recover one from), a
-  // real value -- or still null if the location header was missing -- on the
-  // credentialed path.
-  consume(blobName: string): Promise<{ sourceName: string | null }>;
 }
 
 // Routes through the Marketplace SDK's xmc.contentTransfer.* bridge, keyed by
@@ -48,6 +45,9 @@ export function sdkInstallDestination(client: ClientSDK, sitecoreContextId: stri
     async consume(blobName) {
       await clientTransfer.consumeFile(client, sitecoreContextId, blobName);
       return { sourceName: null };
+    },
+    pollConsumeOutcome(blobName, consumeStartedAt) {
+      return clientTransfer.pollConsumeOutcome(client, sitecoreContextId, blobName, consumeStartedAt);
     },
   };
 }

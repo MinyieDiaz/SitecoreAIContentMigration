@@ -3,6 +3,7 @@
 import { useCallback } from "react";
 import type { InstallDestination } from "@/lib/packages/installDestination";
 import { useStepLoop } from "@/hooks/use-step-loop";
+import { consumeResult, restartConsumeClocks, stepConsume } from "@/lib/consume";
 import type { ChunkSetProgress, InstallPackageJob, PackageManifest } from "@/lib/types";
 
 function createJob(manifest: PackageManifest): InstallPackageJob {
@@ -15,6 +16,7 @@ function createJob(manifest: PackageManifest): InstallPackageJob {
       (chunkSet): ChunkSetProgress => ({
         chunkSetId: chunkSet.chunkSetId,
         chunkCount: chunkSet.chunkCount,
+        totalItemCount: chunkSet.totalItemCount,
         chunksTransferred: 0,
         completed: false,
         isMedia: chunkSet.isMedia,
@@ -24,7 +26,7 @@ function createJob(manifest: PackageManifest): InstallPackageJob {
 }
 
 function isJobComplete(job: InstallPackageJob): boolean {
-  return job.status === "done" || job.status === "failed";
+  return job.status === "done" || job.status === "done-with-errors" || job.status === "failed";
 }
 
 // Scope/merge strategy were fixed on the source at generate time (baked into
@@ -74,21 +76,17 @@ export function useInstallPackage(
 
           case "consuming": {
             if (!next.chunkSets) throw new Error("Missing chunk set metadata");
-            const pending = next.chunkSets.find((chunkSet) => !chunkSet.consumeRequested);
-            if (!pending) {
-              next.status = "done";
-              break;
+            if (await stepConsume(next.chunkSets, destination)) {
+              const { status, error } = consumeResult(next.chunkSets);
+              next.status = status;
+              next.error = error;
             }
-            if (!pending.blobName) throw new Error("Chunk set is missing its completed blob name");
-
-            const { sourceName } = await destination.consume(pending.blobName);
-            pending.consumeRequested = true;
-            pending.sourceName = sourceName;
             break;
           }
         }
       } catch (error) {
         next.status = "failed";
+        next.failedAt = job.status;
         next.error = error instanceof Error ? error.message : "Unknown error";
       }
 
@@ -101,5 +99,24 @@ export function useInstallPackage(
 
   const start = useCallback((manifest: PackageManifest) => run(createJob(manifest)), [run]);
 
-  return { job, running, start, cancel };
+  // Resume keeps every chunk already saved and continues from the failed step
+  // -- the package's chunks are still in memory as long as the page is open.
+  const canResume = Boolean(job?.failedAt);
+
+  const resume = useCallback(() => {
+    if (!job?.failedAt) return;
+    run({
+      ...job,
+      status: job.failedAt,
+      failedAt: undefined,
+      error: undefined,
+      chunkSets: restartConsumeClocks(job.chunkSets),
+    });
+  }, [job, run]);
+
+  const startOver = useCallback(() => {
+    if (job) run(createJob(job.manifest));
+  }, [job, run]);
+
+  return { job, running, start, canResume, resume, startOver, cancel };
 }

@@ -24,11 +24,13 @@ import {
 } from "@/components/ui/table";
 import { EnvironmentSelect } from "@/components/environments/EnvironmentSelect";
 import { EnvironmentCard } from "@/components/wizard/EnvironmentCard";
+import { ChunkSetTable } from "@/components/jobs/ChunkSetTable";
 import { JobProgress } from "@/components/jobs/JobProgress";
 import { useMarketplaceContext } from "@/components/marketplace/MarketplaceProvider";
 import { useEnvironments } from "@/hooks/use-environments";
 import { useInstallPackage } from "@/hooks/use-install-package";
 import { credentialedInstallDestination, sdkInstallDestination } from "@/lib/packages/installDestination";
+import { hasUnconfirmedConsume } from "@/lib/consume";
 import { installPackageProgress } from "@/lib/jobs";
 import { MERGE_STRATEGY_LABELS, SCOPE_LABELS } from "@/lib/labels";
 import { readPackageArchive } from "@/lib/packages/archive";
@@ -62,7 +64,7 @@ export function InstallPackagePanel() {
     [authMode, client, destinationContextId]
   );
   const canInstall = authMode === "credentials" ? installTarget.connected : !!target;
-  const { job, running, start } = useInstallPackage(
+  const { job, running, start, canResume, resume, startOver } = useInstallPackage(
     destination,
     getChunk ??
       (() => {
@@ -73,11 +75,13 @@ export function InstallPackagePanel() {
 
   useEffect(() => {
     if (!job || !running) return;
-    if (job.status !== "done" && job.status !== "failed") return;
+    if (job.status !== "done" && job.status !== "done-with-errors" && job.status !== "failed") return;
     if (notifiedRef.current === job.status) return;
     notifiedRef.current = job.status;
     if (job.status === "failed") toast.error("Install failed");
-    else toast.success("Package submitted for install");
+    else if (job.status === "done-with-errors") toast.warning("Install finished with errors");
+    else if (hasUnconfirmedConsume(job.chunkSets)) toast.success("Package submitted for install");
+    else toast.success("Package installed");
   }, [job, running]);
 
   const handleFile = async (file: File | null) => {
@@ -273,15 +277,19 @@ export function InstallPackagePanel() {
               status={job.status}
               progress={installPackageProgress(job)}
               error={job.error}
+              onRetry={canResume ? resume : startOver}
+              retryLabel={canResume ? "Resume" : "Retry"}
+              onStartOver={canResume ? startOver : undefined}
               doneContent={
                 <div className="space-y-2 text-sm text-muted-foreground">
                   <p>
-                    All items were submitted to the destination. Sitecore consumes each one asynchronously, so
-                    it can take a few moments to finish landing — check the{" "}
+                    {hasUnconfirmedConsume(job.chunkSets)
+                      ? "All parts were submitted to the destination, which doesn't report import status on this route — it can take a few moments to finish landing. Check the "
+                      : "The destination finished importing every part. See the "}
                     <Link href="/explorer" className="underline">
                       Explorer
                     </Link>{" "}
-                    for live status.
+                    for transfer status and history.
                   </p>
                   {job.chunkSets?.some((chunkSet) => chunkSet.sourceName) && (
                     <ul className="list-inside list-disc">
@@ -299,18 +307,18 @@ export function InstallPackagePanel() {
                 </div>
               }
             />
+            {job.chunkSets && <ChunkSetTable chunkSets={job.chunkSets} />}
           </CardContent>
         </Card>
       )}
 
       <div className="flex items-center justify-end gap-3">
         <p className="text-sm text-muted-foreground">
-          A long install can outlive its token; there&apos;s no resume, so a mid-job auth failure means
-          rerunning.
+          If an install fails partway, Resume continues from the failed step while this page stays open.
         </p>
         <Button
           onClick={() => manifest && start(manifest)}
-          disabled={!manifest || !canInstall || running || job?.status === "done"}
+          disabled={!manifest || !canInstall || running || job?.status === "done" || job?.status === "done-with-errors"}
         >
           Install package
         </Button>
