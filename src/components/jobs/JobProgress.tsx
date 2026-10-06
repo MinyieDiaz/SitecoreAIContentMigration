@@ -12,6 +12,9 @@ interface JobProgressProps {
   progress: number;
   error?: string;
   onRetry?: () => void;
+  retryLabel?: string;
+  // Offered alongside onRetry when retrying resumes rather than restarting.
+  onStartOver?: () => void;
   doneContent?: ReactNode;
 }
 
@@ -19,15 +22,32 @@ interface JobProgressProps {
 // transfer job, and Packages' generate/install jobs. What "done" actually
 // means (submitted vs downloaded) differs per flow, so that's left to the
 // caller's doneContent rather than baked in here.
-export function JobProgress({ status, progress, error, onRetry, doneContent }: JobProgressProps) {
+export function JobProgress({
+  status,
+  progress,
+  error,
+  onRetry,
+  retryLabel = "Retry",
+  onStartOver,
+  doneContent,
+}: JobProgressProps) {
   return (
     <div className="space-y-2 rounded-md border p-4">
       <div className="flex items-center justify-between">
         <Badge colorScheme={JOB_STATUS_COLORS[status]}>{JOB_STATUS_LABELS[status]}</Badge>
-        {status === "failed" && onRetry && (
-          <Button variant="outline" size="sm" onClick={onRetry}>
-            Retry
-          </Button>
+        {status === "failed" && (onRetry || onStartOver) && (
+          <div className="flex gap-2">
+            {onStartOver && (
+              <Button variant="ghost" size="sm" onClick={onStartOver}>
+                Start over
+              </Button>
+            )}
+            {onRetry && (
+              <Button variant="outline" size="sm" onClick={onRetry}>
+                {retryLabel}
+              </Button>
+            )}
+          </div>
         )}
       </div>
       <Progress value={progress} />

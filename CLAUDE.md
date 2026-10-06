@@ -117,10 +117,16 @@ everything at once" endpoint. Concretely:
   OpenAPI notes above on why the SDK's `consumeFile` can't hand one back), then `getBlobState` polled until
   `consumeOutcome` is set. Chunk sets are consumed **one at a time, in the order the source returned them** —
   the next consume isn't requested until the previous one reaches a terminal state.
-- Retry (the `retry()` callback in `use-transfer-job.ts`) resets and reruns the whole job client-side, not a
-  single item — the Content Transfer side has no per-item retry, only Item Transfer's per-source retry (exposed
-  separately in the Explorer's Transfers panel, which still goes through the server-side
-  `/api/explorer/transfers/[sourceName]/retry` route).
+- Failures are handled at two levels. Calls that are safe to repeat (`getTransferStatus`, `getChunk`,
+  `saveChunk`, `getBlobState`) retry transient network/gateway errors automatically via `withRetry`
+  (`src/lib/retry.ts`). `createTransfer`, `completeChunkSet`, and `consumeFile` don't, since repeating them
+  could have side effects. If a step still throws, the job records `failedAt`, and **Resume** (`resume()` in
+  `use-transfer-job.ts`) continues from that phase with the same source transfer and chunk progress, while
+  **Start over** (`startOver()`) creates a new source transfer. A job that failed because the destination
+  reported an import error isn't resumable. Packages' install job (`use-install-package.ts`) has the same
+  Resume/Start over pair (its chunks come from the in-memory package, so only while the page stays open). The Content Transfer side has no per-item retry. Item Transfer's
+  per-source retry is exposed separately in the Explorer's Transfers panel, which still goes through the
+  server-side `/api/explorer/transfers/[sourceName]/retry` route.
 
 ## The job confirms the destination import via GetBlobState
 
@@ -129,7 +135,9 @@ above), so `GET /transfers/{sourceName}` was never an option here. Instead, afte
 `xmc.contentTransfer.getBlobState` — keyed by the `.raif` **blob name** the job already has — every 5 seconds
 (`STATUS_POLL_INTERVAL_MS`, deliberately not faster) until it reports `Transferred`, `TransferredWithErrors`, or
 `Error`. The job ends `done`, `done-with-errors` (partial success; `ValidationErrors` are in the Explorer), or
-`failed`. See `pollConsumeOutcome` in `clientTransfer.ts` and `stepConsuming` in `use-transfer-job.ts`.
+`failed`. See `pollConsumeOutcome` in `clientTransfer.ts` and the shared `stepConsume`/`consumeResult` in
+`src/lib/consume.ts`, which the wizard and Packages' install job both use. An install destination without a
+status check (the credentialed route, for now) marks each part `unconfirmed` once its consume is accepted.
 
 Confirmed against a live environment:
 - The SDK types the response as `{ status, details }` — **wrong**. The real body is PascalCase like the rest of

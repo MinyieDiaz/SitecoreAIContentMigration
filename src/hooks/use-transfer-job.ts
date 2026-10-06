@@ -4,7 +4,8 @@ import { useCallback } from "react";
 import type { ClientSDK } from "@sitecore-marketplace-sdk/client";
 import * as clientTransfer from "@/lib/sitecore/clientTransfer";
 import { useStepLoop } from "@/hooks/use-step-loop";
-import type { ConsumeOutcome, SelectedItem, TransferJob } from "@/lib/types";
+import { consumeResult, restartConsumeClocks, stepConsume } from "@/lib/consume";
+import type { SelectedItem, TransferJob } from "@/lib/types";
 
 function createJob(selections: SelectedItem[]): TransferJob {
   return {
@@ -51,6 +52,7 @@ async function stepJob(
     }
   } catch (error) {
     next.status = "failed";
+    next.failedAt = job.status;
     next.error = error instanceof Error ? error.message : "Unknown error";
   }
 
@@ -149,56 +151,22 @@ async function stepConsuming(
 ): Promise<void> {
   if (!job.chunkSets) throw new Error("Missing chunk set metadata");
 
-  // Strictly one chunk set at a time, in the order the source returned them:
-  // the next consume is only requested once the previous one reached a
-  // terminal state.
-  const pendingIndex = job.chunkSets.findIndex((chunkSet) => !chunkSet.consumeOutcome);
-  if (pendingIndex === -1) {
-    if (job.sourceTransferId) {
-      await clientTransfer.deleteTransfer(client, sourceContextId, job.sourceTransferId);
-    }
-    finishJob(job);
-    return;
+  const settled = await stepConsume(job.chunkSets, {
+    consume: async (blobName) => {
+      await clientTransfer.consumeFile(client, destinationContextId, blobName);
+      return { sourceName: null };
+    },
+    pollConsumeOutcome: (blobName, consumeStartedAt) =>
+      clientTransfer.pollConsumeOutcome(client, destinationContextId, blobName, consumeStartedAt),
+  });
+  if (!settled) return;
+
+  if (job.sourceTransferId) {
+    await clientTransfer.deleteTransfer(client, sourceContextId, job.sourceTransferId);
   }
-  const pendingChunkSet = job.chunkSets[pendingIndex];
-  if (!pendingChunkSet.blobName) throw new Error("Chunk set is missing its completed blob name");
-
-  if (!pendingChunkSet.consumeRequested) {
-    await clientTransfer.consumeFile(client, destinationContextId, pendingChunkSet.blobName);
-    pendingChunkSet.consumeRequested = true;
-    pendingChunkSet.consumeStartedAt = Date.now();
-    return;
-  }
-
-  const { state, outcome } = await clientTransfer.pollConsumeOutcome(
-    client,
-    destinationContextId,
-    pendingChunkSet.blobName,
-    pendingChunkSet.consumeStartedAt ?? Date.now()
-  );
-  pendingChunkSet.destinationState = state;
-  if (outcome) pendingChunkSet.consumeOutcome = outcome;
-}
-
-// A part (chunk set) that failed to import doesn't stop the remaining ones --
-// each is its own .raif -- but it does make the whole job "failed". Reported
-// by part, not item path: chunk sets don't map to selected items.
-function finishJob(job: TransferJob): void {
-  const chunkSets = job.chunkSets ?? [];
-  const countWith = (outcome: ConsumeOutcome) =>
-    chunkSets.filter((chunkSet) => chunkSet.consumeOutcome === outcome).length;
-
-  const failed = countWith("error");
-  const partial = countWith("transferred-with-errors");
-  if (failed) {
-    job.status = "failed";
-    job.error = `Destination failed to import ${failed} of ${chunkSets.length} part(s) — see the Explorer for details`;
-  } else if (partial) {
-    job.status = "done-with-errors";
-    job.error = `${partial} of ${chunkSets.length} part(s) imported with errors — see the Explorer's Transfers panel for details`;
-  } else {
-    job.status = "done";
-  }
+  const { status, error } = consumeResult(job.chunkSets);
+  job.status = status;
+  job.error = error;
 }
 
 export function useTransferJob(client: ClientSDK, sourceContextId: string, destinationContextId: string) {
@@ -213,17 +181,40 @@ export function useTransferJob(client: ClientSDK, sourceContextId: string, desti
     [run]
   );
 
-  const retry = useCallback(() => {
+  // Resumable once the source transfer exists: chunks already copied, chunk
+  // sets already completed, and imports already confirmed are kept. Wait
+  // clocks restart so a resumed poll isn't immediately over its time limit.
+  const canResume = Boolean(job?.failedAt && job.failedAt !== "pending" && job.sourceTransferId);
+
+  const resume = useCallback(() => {
+    if (!job?.failedAt || !canResume) return;
+    run({
+      ...job,
+      status: job.failedAt,
+      failedAt: undefined,
+      error: undefined,
+      preparingSince: job.failedAt === "preparing" ? Date.now() : job.preparingSince,
+      chunkSets: restartConsumeClocks(job.chunkSets),
+    });
+  }, [job, canResume, run]);
+
+  // Throws away all progress and creates a new source transfer. The old one is
+  // deleted best-effort -- it's only cleanup, so a failure there is ignored.
+  const startOver = useCallback(() => {
     if (!job) return;
+    if (job.sourceTransferId) {
+      clientTransfer.deleteTransfer(client, sourceContextId, job.sourceTransferId).catch(() => {});
+    }
     run({
       ...job,
       status: "pending",
       error: undefined,
+      failedAt: undefined,
       sourceTransferId: undefined,
       preparingSince: undefined,
       chunkSets: undefined,
     });
-  }, [job, run]);
+  }, [job, run, client, sourceContextId]);
 
-  return { job, running, start, retry, cancel };
+  return { job, running, start, canResume, resume, startOver, cancel };
 }

@@ -1,4 +1,5 @@
 import type { ClientSDK } from "@sitecore-marketplace-sdk/client";
+import { withRetry } from "@/lib/retry";
 import type { ChunkSetProgress, ConsumeOutcome, MergeStrategy, TransferScope } from "@/lib/types";
 
 export class ClientTransferError extends Error {
@@ -97,10 +98,12 @@ export async function getTransferStatus(
   sitecoreContextId: string,
   transferId: string
 ): Promise<{ state: string; chunkSets: ChunkSetStatus[] }> {
-  const outer = await client.query("xmc.contentTransfer.getContentTransferStatus", {
-    params: { path: { transferId }, query: { sitecoreContextId } },
+  const body = await withRetry(async () => {
+    const outer = await client.query("xmc.contentTransfer.getContentTransferStatus", {
+      params: { path: { transferId }, query: { sitecoreContextId } },
+    });
+    return unwrapPayload(unwrapQueryOuter(outer, "Get transfer status"), "Get transfer status");
   });
-  const body = unwrapPayload(unwrapQueryOuter(outer, "Get transfer status"), "Get transfer status");
   return {
     state: body.State,
     chunkSets: (body.ChunkSetsMetadata ?? []).map((chunkSet) => ({
@@ -213,10 +216,12 @@ export async function getChunk(
   chunksetId: string,
   chunkId: number
 ): Promise<Blob> {
-  const outer = await client.query("xmc.contentTransfer.getChunk", {
-    params: { path: { transferId, chunksetId, chunkId }, query: { sitecoreContextId } },
+  const chunk = await withRetry(async () => {
+    const outer = await client.query("xmc.contentTransfer.getChunk", {
+      params: { path: { transferId, chunksetId, chunkId }, query: { sitecoreContextId } },
+    });
+    return unwrapPayload(unwrapQueryOuter(outer, "Get chunk"), "Get chunk");
   });
-  const chunk = unwrapPayload(unwrapQueryOuter(outer, "Get chunk"), "Get chunk");
   return chunk instanceof Blob ? chunk : new Blob([chunk]);
 }
 
@@ -232,14 +237,17 @@ export async function saveChunk(
   data: Blob,
   isMedia: boolean
 ): Promise<void> {
-  const result = await client.mutate("xmc.contentTransfer.saveChunk", {
-    params: {
-      path: { transferId, chunksetId, chunkId },
-      query: { sitecoreContextId, isMedia },
-      body: data,
-    },
+  // Safe to repeat: a chunk is addressed by its chunkId, so a re-PUT replaces it.
+  await withRetry(async () => {
+    const result = await client.mutate("xmc.contentTransfer.saveChunk", {
+      params: {
+        path: { transferId, chunksetId, chunkId },
+        query: { sitecoreContextId, isMedia },
+        body: data,
+      },
+    });
+    assertNoError(result, "Save chunk");
   });
-  assertNoError(result, "Save chunk");
 }
 
 // Called against the DESTINATION environment's sitecoreContextId once every
@@ -323,10 +331,13 @@ const BLOB_NOT_FOUND = /BlobNotFound|\b404\b/i;
 
 async function queryBlobState(client: ClientSDK, sitecoreContextId: string, fileName: string): Promise<string> {
   try {
-    const outer = await client.query("xmc.contentTransfer.getBlobState", {
-      params: { query: { fileName, sitecoreContextId } },
+    const body = await withRetry(async () => {
+      const outer = await client.query("xmc.contentTransfer.getBlobState", {
+        params: { query: { fileName, sitecoreContextId } },
+      });
+      return unwrapPayload(unwrapQueryOuter(outer, "Get blob state"), "Get blob state");
     });
-    return readBlobState(unwrapPayload(unwrapQueryOuter(outer, "Get blob state"), "Get blob state"));
+    return readBlobState(body);
   } catch (error) {
     if (error instanceof Error && BLOB_NOT_FOUND.test(error.message)) return "NotFound";
     throw error;

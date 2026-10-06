@@ -13,8 +13,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { ChunkSetTable } from "@/components/jobs/ChunkSetTable";
 import { JobProgress } from "@/components/jobs/JobProgress";
 import { MERGE_STRATEGY_LABELS, SCOPE_LABELS } from "@/lib/labels";
+import { hasUnconfirmedConsume } from "@/lib/consume";
 import { transferJobProgress } from "@/lib/jobs";
 import { useTransferJob } from "@/hooks/use-transfer-job";
 import type { SelectedItem, TransferJob } from "@/lib/types";
@@ -34,7 +36,11 @@ export function ReviewTransferStep({
   selections,
   onBack,
 }: ReviewTransferStepProps) {
-  const { job, running, start, retry } = useTransferJob(client, sourceContextId, destinationContextId);
+  const { job, running, start, canResume, resume, startOver } = useTransferJob(
+    client,
+    sourceContextId,
+    destinationContextId
+  );
   const notifiedRef = useRef<TransferJob["status"] | null>(null);
 
   useEffect(() => {
@@ -64,10 +70,12 @@ export function ReviewTransferStep({
           status={job.status}
           progress={transferJobProgress(job)}
           error={job.error}
-          onRetry={retry}
+          onRetry={canResume ? resume : startOver}
+          retryLabel={canResume ? "Resume" : "Retry"}
+          onStartOver={canResume ? startOver : undefined}
           doneContent={
             <p className="text-sm text-muted-foreground">
-              {job.chunkSets?.some((chunkSet) => chunkSet.consumeOutcome === "unconfirmed")
+              {hasUnconfirmedConsume(job.chunkSets)
                 ? "Every part was submitted, but the destination didn't report an import status for all of them, so completion isn't confirmed. Check the "
                 : "The destination finished importing every part. See the "}
               <Link href="/explorer" className="underline">
@@ -79,34 +87,7 @@ export function ReviewTransferStep({
         />
       )}
 
-      {/* Per chunk set, not per selection -- the source decides how selected items are grouped into parts. */}
-      {job?.chunkSets && (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Part</TableHead>
-              <TableHead>Items</TableHead>
-              <TableHead>Chunks</TableHead>
-              <TableHead>Destination</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {job.chunkSets.map((chunkSet, index) => (
-              <TableRow key={chunkSet.chunkSetId}>
-                <TableCell>
-                  {index + 1} of {job.chunkSets?.length}
-                </TableCell>
-                <TableCell>{chunkSet.totalItemCount ?? "—"}</TableCell>
-                <TableCell>
-                  {chunkSet.chunksTransferred} / {chunkSet.chunkCount}
-                </TableCell>
-                {/* Raw GetBlobState value, so an unexpected response shape is visible. */}
-                <TableCell>{chunkSet.destinationState ?? (chunkSet.consumeRequested ? "Submitted" : "—")}</TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      )}
+      {job?.chunkSets && <ChunkSetTable chunkSets={job.chunkSets} />}
 
       <Table>
         <TableHeader>

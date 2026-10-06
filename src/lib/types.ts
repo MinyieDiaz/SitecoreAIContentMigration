@@ -101,6 +101,10 @@ export interface TransferJob {
   preparingSince?: number;
   chunkSets?: ChunkSetProgress[];
   error?: string;
+  // The phase whose step threw, so Resume can pick up there with the same
+  // source transfer and chunk progress. Unset when the job failed because the
+  // destination reported an import error -- resuming can't change that.
+  failedAt?: JobStatus;
 }
 
 // Bumped whenever the package zip layout or manifest shape changes in a way
@@ -158,7 +162,11 @@ export interface InstallPackageJob {
   jobId: string;
   createdAt: number;
   manifest: PackageManifest;
-  status: Exclude<PackageJobStatus, "packaging" | "preparing" | "done-with-errors">;
+  status: InstallJobStatus;
   chunkSets?: ChunkSetProgress[];
   error?: string;
+  // Same meaning as TransferJob.failedAt.
+  failedAt?: InstallJobStatus;
 }
+
+type InstallJobStatus = Exclude<PackageJobStatus, "packaging" | "preparing">;
