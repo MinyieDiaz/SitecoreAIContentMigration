@@ -4,7 +4,7 @@ import { useCallback } from "react";
 import type { ClientSDK } from "@sitecore-marketplace-sdk/client";
 import * as clientTransfer from "@/lib/sitecore/clientTransfer";
 import { useStepLoop } from "@/hooks/use-step-loop";
-import type { ChunkSetProgress, SelectedItem, TransferJob } from "@/lib/types";
+import type { ConsumeOutcome, SelectedItem, TransferJob } from "@/lib/types";
 
 function createJob(selections: SelectedItem[]): TransferJob {
   return {
@@ -16,19 +16,14 @@ function createJob(selections: SelectedItem[]): TransferJob {
 }
 
 function isJobComplete(job: TransferJob): boolean {
-  return job.status === "done" || job.status === "failed";
+  return job.status === "done" || job.status === "done-with-errors" || job.status === "failed";
 }
 
-const MEDIA_LIBRARY_PATH_PREFIX = "/sitecore/media library/";
-
-function isMediaItemPath(path: string): boolean {
-  return path.toLowerCase().startsWith(MEDIA_LIBRARY_PATH_PREFIX);
-}
-
-// Advances the job by exactly one unit of work (one chunk, one chunk-set
-// completion, one poll), mirroring the step-per-call shape the old server-side
-// orchestrator used -- kept the same even though there's no longer an HTTP
-// request to keep short, since it makes progress observable between renders.
+// Advances the job by exactly one unit of work (one source-readiness poll, one
+// chunk, one chunk-set completion, one consume request, one consume-status
+// poll), mirroring the step-per-call shape the old server-side orchestrator
+// used -- kept the same even though there's no longer an HTTP request to keep
+// short, since it makes progress observable between renders.
 async function stepJob(
   client: ClientSDK,
   job: TransferJob,
@@ -43,6 +38,9 @@ async function stepJob(
     switch (next.status) {
       case "pending":
         await stepPending(client, next, sourceContextId);
+        break;
+      case "preparing":
+        await stepPreparing(client, next, sourceContextId);
         break;
       case "transferring-chunks":
         await stepTransferringChunks(client, next, sourceContextId, destinationContextId);
@@ -70,6 +68,23 @@ async function stepPending(client: ClientSDK, job: TransferJob, sourceContextId:
     })),
   });
   job.sourceTransferId = transferId;
+  job.preparingSince = Date.now();
+  job.status = "preparing";
+}
+
+async function stepPreparing(client: ClientSDK, job: TransferJob, sourceContextId: string): Promise<void> {
+  const transferId = job.sourceTransferId;
+  if (!transferId) throw new Error("Missing source transfer ID");
+
+  const chunkSets = await clientTransfer.pollPreparedChunkSets(
+    client,
+    sourceContextId,
+    transferId,
+    job.items.map((item) => item.path),
+    job.preparingSince ?? Date.now()
+  );
+  if (!chunkSets) return;
+  job.chunkSets = chunkSets;
   job.status = "transferring-chunks";
 }
 
@@ -81,19 +96,7 @@ async function stepTransferringChunks(
 ): Promise<void> {
   const transferId = job.sourceTransferId;
   if (!transferId) throw new Error("Missing source transfer ID");
-
-  if (!job.chunkSets) {
-    const status = await clientTransfer.getTransferStatus(client, sourceContextId, transferId);
-    job.chunkSets = status.chunkSets.map(
-      (chunkSet): ChunkSetProgress => ({
-        chunkSetId: chunkSet.chunkSetId,
-        chunkCount: chunkSet.chunkCount,
-        chunksTransferred: 0,
-        completed: false,
-      })
-    );
-    return;
-  }
+  if (!job.chunkSets) throw new Error("Missing chunk set metadata");
 
   const pendingChunkSetIndex = job.chunkSets.findIndex((chunkSet) => !chunkSet.completed);
   if (pendingChunkSetIndex === -1) {
@@ -101,7 +104,6 @@ async function stepTransferringChunks(
     return;
   }
   const pendingChunkSet = job.chunkSets[pendingChunkSetIndex];
-  const isMedia = isMediaItemPath(job.items[pendingChunkSetIndex].path);
 
   if (pendingChunkSet.chunksTransferred < pendingChunkSet.chunkCount) {
     const chunkId = pendingChunkSet.chunksTransferred;
@@ -119,7 +121,7 @@ async function stepTransferringChunks(
       pendingChunkSet.chunkSetId,
       chunkId,
       chunk,
-      isMedia
+      pendingChunkSet.isMedia ?? false
     );
     pendingChunkSet.chunksTransferred += 1;
     return;
@@ -147,18 +149,56 @@ async function stepConsuming(
 ): Promise<void> {
   if (!job.chunkSets) throw new Error("Missing chunk set metadata");
 
-  const pendingChunkSet = job.chunkSets.find((chunkSet) => !chunkSet.consumeRequested);
-  if (!pendingChunkSet) {
+  // Strictly one chunk set at a time, in the order the source returned them:
+  // the next consume is only requested once the previous one reached a
+  // terminal state.
+  const pendingIndex = job.chunkSets.findIndex((chunkSet) => !chunkSet.consumeOutcome);
+  if (pendingIndex === -1) {
     if (job.sourceTransferId) {
       await clientTransfer.deleteTransfer(client, sourceContextId, job.sourceTransferId);
     }
-    job.status = "done";
+    finishJob(job);
     return;
   }
+  const pendingChunkSet = job.chunkSets[pendingIndex];
   if (!pendingChunkSet.blobName) throw new Error("Chunk set is missing its completed blob name");
 
-  await clientTransfer.consumeFile(client, destinationContextId, pendingChunkSet.blobName);
-  pendingChunkSet.consumeRequested = true;
+  if (!pendingChunkSet.consumeRequested) {
+    await clientTransfer.consumeFile(client, destinationContextId, pendingChunkSet.blobName);
+    pendingChunkSet.consumeRequested = true;
+    pendingChunkSet.consumeStartedAt = Date.now();
+    return;
+  }
+
+  const { state, outcome } = await clientTransfer.pollConsumeOutcome(
+    client,
+    destinationContextId,
+    pendingChunkSet.blobName,
+    pendingChunkSet.consumeStartedAt ?? Date.now()
+  );
+  pendingChunkSet.destinationState = state;
+  if (outcome) pendingChunkSet.consumeOutcome = outcome;
+}
+
+// A part (chunk set) that failed to import doesn't stop the remaining ones --
+// each is its own .raif -- but it does make the whole job "failed". Reported
+// by part, not item path: chunk sets don't map to selected items.
+function finishJob(job: TransferJob): void {
+  const chunkSets = job.chunkSets ?? [];
+  const countWith = (outcome: ConsumeOutcome) =>
+    chunkSets.filter((chunkSet) => chunkSet.consumeOutcome === outcome).length;
+
+  const failed = countWith("error");
+  const partial = countWith("transferred-with-errors");
+  if (failed) {
+    job.status = "failed";
+    job.error = `Destination failed to import ${failed} of ${chunkSets.length} part(s) — see the Explorer for details`;
+  } else if (partial) {
+    job.status = "done-with-errors";
+    job.error = `${partial} of ${chunkSets.length} part(s) imported with errors — see the Explorer's Transfers panel for details`;
+  } else {
+    job.status = "done";
+  }
 }
 
 export function useTransferJob(client: ClientSDK, sourceContextId: string, destinationContextId: string) {
@@ -180,6 +220,7 @@ export function useTransferJob(client: ClientSDK, sourceContextId: string, desti
       status: "pending",
       error: undefined,
       sourceTransferId: undefined,
+      preparingSince: undefined,
       chunkSets: undefined,
     });
   }, [job, run]);

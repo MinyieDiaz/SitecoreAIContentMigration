@@ -32,6 +32,7 @@ export function JobProgress({ status, progress, error, onRetry, doneContent }: J
       </div>
       <Progress value={progress} />
       {status === "failed" && error && <p className="text-sm text-danger-fg">{error}</p>}
+      {status === "done-with-errors" && error && <p className="text-sm text-warning-fg">{error}</p>}
       {status === "done" && doneContent}
     </div>
   );

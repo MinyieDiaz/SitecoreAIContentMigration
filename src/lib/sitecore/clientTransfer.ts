@@ -1,5 +1,5 @@
 import type { ClientSDK } from "@sitecore-marketplace-sdk/client";
-import type { MergeStrategy, TransferScope } from "@/lib/types";
+import type { ChunkSetProgress, ConsumeOutcome, MergeStrategy, TransferScope } from "@/lib/types";
 
 export class ClientTransferError extends Error {
   constructor(message: string) {
@@ -111,6 +111,100 @@ export async function getTransferStatus(
   };
 }
 
+// createContentTransfer only returns 202 Accepted -- the source builds the
+// transfer asynchronously, and ChunkSetsMetadata is empty or partial until
+// State reaches Completed (per Sitecore's migration walkthrough: "Poll this
+// endpoint until State is Completed"). Reading it any earlier is what made an
+// ItemAndDescendants transfer "finish" instantly with nothing in it.
+const TRANSFER_STATE_COMPLETED = "completed";
+const TRANSFER_STATE_FAILED = "failed";
+const PREPARE_TIMEOUT_MS = 30 * 60 * 1000;
+
+// Shared by every status poll (source readiness, destination consume): the
+// first check is immediate, then one every 5 seconds -- deliberately not
+// faster, so a long-running transfer doesn't hammer either environment.
+const STATUS_POLL_INTERVAL_MS = 5000;
+
+function waitForNextPoll(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, STATUS_POLL_INTERVAL_MS));
+}
+
+// A Completed transfer with nothing in it would otherwise "succeed" while
+// moving nothing -- fail instead.
+function assertTransferNotEmpty(chunkSets: ChunkSetStatus[]): void {
+  const totalItems = chunkSets.reduce((sum, chunkSet) => sum + chunkSet.totalItemCount, 0);
+  if (chunkSets.length === 0 || totalItems === 0) {
+    throw new ClientTransferError("Source prepared the transfer, but it contains no items");
+  }
+}
+
+// The status response doesn't say which selected items went into which chunk
+// set, and it isn't one chunk set per item: a live two-item transfer came back
+// as a single chunk set. When the counts do match, submission order is assumed
+// to line up (as this app always has); otherwise isMedia can only be resolved
+// when every selected item agrees on it.
+function resolveChunkSetIsMedia(itemPaths: string[], chunkSetCount: number): boolean[] {
+  const itemIsMedia = itemPaths.map(isMediaItemPath);
+  if (chunkSetCount === itemPaths.length) return itemIsMedia;
+  if (itemIsMedia.every((isMedia) => isMedia === itemIsMedia[0])) {
+    return Array<boolean>(chunkSetCount).fill(itemIsMedia[0] ?? false);
+  }
+  throw new ClientTransferError(
+    "Source grouped media library and other items together in a way this app can't tell apart — transfer media library items separately from other content"
+  );
+}
+
+// One "preparing" step: checks the source transfer's State once. Returns the
+// chunk sets once it's Completed, or waits out the poll interval and returns
+// null so the caller's step loop can re-render and call again.
+export async function pollPreparedChunkSets(
+  client: ClientSDK,
+  sitecoreContextId: string,
+  transferId: string,
+  itemPaths: string[],
+  preparingSince: number
+): Promise<ChunkSetProgress[] | null> {
+  const status = await getTransferStatus(client, sitecoreContextId, transferId);
+  const state = status.state?.toLowerCase();
+
+  if (state === TRANSFER_STATE_FAILED) {
+    throw new ClientTransferError("Source failed to prepare the transfer — retry to create a new one");
+  }
+
+  if (state !== TRANSFER_STATE_COMPLETED) {
+    const elapsedMs = Date.now() - preparingSince;
+    if (elapsedMs > PREPARE_TIMEOUT_MS) {
+      throw new ClientTransferError(
+        `Source was still preparing the transfer after ${PREPARE_TIMEOUT_MS / 60_000} minutes (state: ${status.state})`
+      );
+    }
+    await waitForNextPoll();
+    return null;
+  }
+
+  assertTransferNotEmpty(status.chunkSets);
+  const isMedia = resolveChunkSetIsMedia(itemPaths, status.chunkSets.length);
+  return status.chunkSets.map((chunkSet, index) => ({
+    chunkSetId: chunkSet.chunkSetId,
+    chunkCount: chunkSet.chunkCount,
+    totalItemCount: chunkSet.totalItemCount,
+    chunksTransferred: 0,
+    completed: false,
+    isMedia: isMedia[index],
+  }));
+}
+
+const MEDIA_LIBRARY_PATH = "/sitecore/media library";
+
+// Matches the Media Library root itself as well as anything under it. The
+// docs say isMedia should come from getChunk's Content-Disposition header, but
+// the SDK's getChunk only hands back a Blob, so the selected item's path is
+// the only signal available on this path.
+export function isMediaItemPath(path: string): boolean {
+  const normalized = path.toLowerCase();
+  return normalized === MEDIA_LIBRARY_PATH || normalized.startsWith(`${MEDIA_LIBRARY_PATH}/`);
+}
+
 // Called against the SOURCE environment's sitecoreContextId.
 export async function getChunk(
   client: ClientSDK,
@@ -181,6 +275,108 @@ export async function consumeFile(
     params: { query: { databaseName: DATABASE_NAME, fileName: `blob://${blobName}`, sitecoreContextId } },
   });
   assertNoError(unwrapQueryOuter(outer, "Consume file"), "Consume file");
+}
+
+// The SDK types GetBlobState's response as `{ status, details }`, but the live
+// body is PascalCase like the rest of this API (confirmed against a real
+// environment):
+//   { BlobState: "Transferred", Error: null, ConsumedName: "consumed.<ts>.<guid>",
+//     Actions: { Details: "/sitecore/shell/api/v2/ItemsTransfer/StatusDetails?..." } }
+// ConsumedName is the Item Transfer sourceName the Explorer works with.
+interface BlobStateResponse {
+  BlobState?: string;
+  Error?: unknown;
+  ConsumedName?: string;
+}
+
+function readBlobState(body: unknown): string {
+  const { BlobState, Error: error } = (body ?? {}) as BlobStateResponse;
+  if (BlobState) return BlobState;
+  return error ? "Error" : "Unknown";
+}
+
+// Terminal states only -- anything else (Uploaded, Queued, Initializing,
+// Consumed, ...) means the destination is still working on it. "Consumed" is
+// NOT terminal: items are readable at that point, but the background sync to
+// the database hasn't finished until "Transferred" (a consumed blob was later
+// seen listed as Transferred).
+function classifyBlobState(state: string): ConsumeOutcome | "not-found" | null {
+  switch (state.toLowerCase()) {
+    case "transferred":
+      return "transferred";
+    case "transferredwitherrors":
+      return "transferred-with-errors";
+    case "error":
+    case "failed":
+      return "error";
+    case "notfound":
+      return "not-found";
+    default:
+      return null;
+  }
+}
+
+// A missing blob comes back as an error, not as `status: NotFound` -- the
+// live response was a 404 with Azure's "BlobNotFound" error code embedded in
+// the message. Normalize it to the NotFound state so callers can decide.
+const BLOB_NOT_FOUND = /BlobNotFound|\b404\b/i;
+
+async function queryBlobState(client: ClientSDK, sitecoreContextId: string, fileName: string): Promise<string> {
+  try {
+    const outer = await client.query("xmc.contentTransfer.getBlobState", {
+      params: { query: { fileName, sitecoreContextId } },
+    });
+    return readBlobState(unwrapPayload(unwrapQueryOuter(outer, "Get blob state"), "Get blob state"));
+  } catch (error) {
+    if (error instanceof Error && BLOB_NOT_FOUND.test(error.message)) return "NotFound";
+    throw error;
+  }
+}
+
+// Called against the DESTINATION environment's sitecoreContextId. Takes the
+// BARE blob name -- unlike consumeFile, which requires `blob://`. Confirmed
+// live: `blob://<name>` came back BlobNotFound while the same .raif was listed
+// (by bare name) in the destination's blob sources as Transferred.
+export async function getBlobState(
+  client: ClientSDK,
+  sitecoreContextId: string,
+  blobName: string
+): Promise<string> {
+  return queryBlobState(client, sitecoreContextId, blobName);
+}
+
+const CONSUME_TIMEOUT_MS = 60 * 60 * 1000;
+// A blob can briefly be unknown to GetBlobState right after consume is
+// requested; past this, NotFound means the status can't be read at all, and
+// the chunk set ends "unconfirmed" rather than failed -- the consume itself
+// was accepted, and the content may well have landed.
+const CONSUME_NOT_FOUND_GRACE_MS = 2 * 60 * 1000;
+export const UNCONFIRMED_DESTINATION_STATE = "Submitted (status unavailable)";
+
+// One "consuming" check for a single chunk set's .raif: reads its state once,
+// and if it isn't terminal yet, waits out the poll interval before returning
+// so the caller's step loop calls again.
+export async function pollConsumeOutcome(
+  client: ClientSDK,
+  sitecoreContextId: string,
+  blobName: string,
+  consumeStartedAt: number
+): Promise<{ state: string; outcome: ConsumeOutcome | null }> {
+  const state = await getBlobState(client, sitecoreContextId, blobName);
+  const outcome = classifyBlobState(state);
+  if (outcome && outcome !== "not-found") return { state, outcome };
+
+  const elapsedMs = Date.now() - consumeStartedAt;
+  if (outcome === "not-found" && elapsedMs > CONSUME_NOT_FOUND_GRACE_MS) {
+    return { state: UNCONFIRMED_DESTINATION_STATE, outcome: "unconfirmed" };
+  }
+  if (elapsedMs > CONSUME_TIMEOUT_MS) {
+    throw new ClientTransferError(
+      `Destination was still importing ${blobName} after ${CONSUME_TIMEOUT_MS / 60_000} minutes (state: ${state}) — check the Explorer`
+    );
+  }
+  await waitForNextPoll();
+  return { state, outcome: null };
 }
 
 // Called against the SOURCE environment's sitecoreContextId to release the

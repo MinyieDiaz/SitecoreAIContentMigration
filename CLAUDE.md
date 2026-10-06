@@ -55,8 +55,9 @@ Two independent authorization paths coexist — don't assume a change to one app
   Navigation starts at `/sitecore` (`DEFAULT_ROOT_PATH` in `src/lib/types.ts`), i.e. the full content tree —
   templates, layouts, media library, system items — not just `/sitecore/content`.
 - Migration runs as a **client-side step loop**, not a server-orchestrated job: `stepJob` in
-  `src/hooks/use-transfer-job.ts` advances exactly one unit of work (one chunk, one chunk-set completion, one
-  consume request) per call and is looped from a `useCallback` in the browser, so progress is observable between
+  `src/hooks/use-transfer-job.ts` advances exactly one unit of work (one source-readiness poll, one chunk, one
+  chunk-set completion, one consume request, one consume-status poll) per call and is looped from a
+  `useCallback` in the browser, so progress is observable between
   renders without a server-side job store, an HTTP endpoint to poll, or a long-lived execution context. There is
   no `/api/transfer/*` route — that orchestration used to live server-side (see git history for the old
   `orchestrator.ts` / `/api/transfer/[jobId]/step` design) before moving to this client-side model.
@@ -80,7 +81,12 @@ changed. Key things that are easy to get wrong if re-deriving this from the pros
   returns a `location` header carrying the resulting source name. There is therefore no way for the wizard to
   recover a `sourceName` from its own consume call; `ChunkSetProgress.consumeRequested` is a boolean ("was
   consume requested") rather than a resolved name — see `src/lib/types.ts`. The raw `location`-header behavior
-  only still matters for the Explorer, which doesn't go through this SDK call at all.
+  only still matters for the Explorer, which doesn't go through this SDK call at all. The wizard tracks the
+  outcome by **blob name** instead, via `xmc.contentTransfer.getBlobState` — see the last section below.
+- `createContentTransfer` returns `202 Accepted` and the source builds the transfer **asynchronously**: poll
+  `getContentTransferStatus` until `State` is `Completed` before trusting `ChunkSetsMetadata` (it's empty or
+  partial before then). Reading it early is what made `ItemAndDescendants` transfers "finish" instantly with
+  nothing in them — see `pollPreparedChunkSets` in `clientTransfer.ts`.
 - The Item Transfer API's `ItemData` (`GET .../items`) has no path field, only `Name`/`ParentId`/`Id` — there is
   no supported way to get a full item path back from that endpoint.
 - `GET /transfers/{transferId}`'s `transferId` path segment is actually the source/blob file name, not a
@@ -93,40 +99,52 @@ changed. Key things that are easy to get wrong if re-deriving this from the pros
 Sitecore has a confirmed bug in that strategy — but stays in the type/labels so past jobs that used it still
 render correctly in the Explorer's history.
 
-## One job, one chunk set per item, one blob per chunk set
+## One job, one or more chunk sets, one blob per chunk set
 
 A `TransferJob` (client-side state in `src/hooks/use-transfer-job.ts`) creates exactly one Content Transfer
-operation whose `dataTrees` array carries every selected item in a single `createTransfer` call — but the API
-itself splits that into **one chunk set per data tree**, and each completed chunk set becomes its own
-independent `.raif` file that must be separately consumed by the Item Transfer API (via the SDK's `consumeFile`).
-There is no batched "consume everything at once" endpoint. Concretely:
-- `job.chunkSets` is index-aligned with `job.items` — `chunkSets[i]` is assumed to correspond to `items[i]`
-  because the confirmed status response returns chunk sets in DataTrees submission order and doesn't otherwise
-  say which chunk set came from which item.
+operation whose `dataTrees` array carries every selected item in a single `createTransfer` call. The API splits
+that into **one or more chunk sets**, and each completed chunk set becomes its own independent `.raif` file that
+must be separately consumed by the Item Transfer API (via the SDK's `consumeFile`). There is no batched "consume
+everything at once" endpoint. Concretely:
+- Chunk sets are **not** one per selected item — a live two-item transfer came back as a single chunk set — and
+  the status response doesn't say which items a chunk set holds. Never index `job.items` by chunk set position.
+  Progress and outcomes are reported per chunk set ("part") on Review. `isMedia` is resolved once when the
+  transfer is prepared (`resolveChunkSetIsMedia` in `clientTransfer.ts`): index-aligned when the counts happen
+  to match, otherwise only when every selected item agrees on it — a mixed media/non-media selection whose
+  counts don't match fails with a "transfer media library items separately" error.
 - Each chunk set carries its own destination pipeline once its chunks are uploaded: `completeChunkSet` →
   `blobName`, then `consumeFile` → `consumeRequested: true` (not a resolved destination source name — see the
-  OpenAPI notes above on why the SDK's `consumeFile` can't hand one back).
+  OpenAPI notes above on why the SDK's `consumeFile` can't hand one back), then `getBlobState` polled until
+  `consumeOutcome` is set. Chunk sets are consumed **one at a time, in the order the source returned them** —
+  the next consume isn't requested until the previous one reaches a terminal state.
 - Retry (the `retry()` callback in `use-transfer-job.ts`) resets and reruns the whole job client-side, not a
   single item — the Content Transfer side has no per-item retry, only Item Transfer's per-source retry (exposed
   separately in the Explorer's Transfers panel, which still goes through the server-side
   `/api/explorer/transfers/[sourceName]/retry` route).
 
-## The job reports "submitted," not "confirmed complete" — by design
+## The job confirms the destination import via GetBlobState
 
-`stepJob` does **not** poll the destination to confirm a consume actually finished. It was originally written
-(in an earlier, server-side-orchestrated version of this app) to poll `GET /transfers/{sourceName}` until
-`TransferState` was `Finished`/`Failed`, but in testing against a real environment a small/fast transfer (single
-item, single chunk) returned a persistent 404 from that endpoint — for over a minute — even though the item had
-already visibly landed in the destination. The transfer record appears to age out of that single-lookup endpoint
-faster than it can be reliably confirmed there, despite `GET /transfers` (the list endpoint) being documented to
-include completed transfers too.
+The wizard's consume goes through the SDK's `consumeFile`, which exposes no `sourceName` (see the OpenAPI notes
+above), so `GET /transfers/{sourceName}` was never an option here. Instead, after each consume the job polls
+`xmc.contentTransfer.getBlobState` — keyed by the `.raif` **blob name** the job already has — every 5 seconds
+(`STATUS_POLL_INTERVAL_MS`, deliberately not faster) until it reports `Transferred`, `TransferredWithErrors`, or
+`Error`. The job ends `done`, `done-with-errors` (partial success; `ValidationErrors` are in the Explorer), or
+`failed`. See `pollConsumeOutcome` in `clientTransfer.ts` and `stepConsuming` in `use-transfer-job.ts`.
 
-That timing problem is now moot but the conclusion still holds, for a stronger reason: the wizard's consume call
-goes through the Marketplace SDK's `xmc.contentTransfer.consumeFile`, which — unlike the raw Item Transfer API —
-exposes no `sourceName` to poll with at all (see the OpenAPI notes above). So the job is considered `done` as
-soon as every chunk set's consume request has been **accepted** (`consumeRequested: true` for all of them), not
-once completion is confirmed — there's currently no wizard-side identifier to confirm it with even if the flaky
-lookup above were fixed. The Review step's copy reflects this ("submitted", with a link to the Explorer) instead
-of claiming success. Actual outcome is tracked asynchronously via the Explorer's Transfers and History panels
-(which still go through the raw Item Transfer API server-side and do have a `sourceName` to work with), fetched
-on demand with manual Refresh buttons for exactly this reason — give the destination a moment, then refresh.
+Confirmed against a live environment:
+- The SDK types the response as `{ status, details }` — **wrong**. The real body is PascalCase like the rest of
+  this API: `{ BlobState, Error, ConsumedName, Actions: { Details } }`, where `Actions.Details` is a
+  status-details URL string. Parsing the SDK's shape read nothing and left jobs stuck in "consuming".
+  `BlobState` goes `Consumed` (items readable) → `Transferred` (background DB sync finished); only the latter
+  is terminal — both observed live on the same blob.
+- `ConsumedName` (`consumed.<timestamp>.<guid>`) is the Item Transfer **sourceName** — so the wizard *can*
+  recover one after all, just from GetBlobState rather than from `consumeFile`. Nothing uses it yet.
+- `GetBlobState` takes the **bare** blob name — unlike `consumeFile`, which requires `blob://`. Confirmed live:
+  `blob://<name>` returned an error carrying Azure's `404 BlobNotFound` (an error, not a `status: NotFound`
+  body), while the same `.raif` was listed by bare name in the destination's blob sources as `Transferred` — so
+  the blob does persist after consume. `getBlobState` still normalizes a `BlobNotFound` error to `NotFound`;
+  if that persists past a 2-minute grace period the chunk set ends `unconfirmed` (the pre-GetBlobState
+  "submitted" behavior, and Review says so) rather than failing a job whose content may well have landed.
+
+The Explorer's Transfers and History panels still track outcomes independently through the raw Item Transfer
+API server-side (where a `sourceName` is available).

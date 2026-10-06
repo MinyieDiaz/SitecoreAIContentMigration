@@ -20,18 +20,22 @@ export const MERGE_STRATEGY_LABELS: Record<MergeStrategy, string> = {
 // to each JobProgress caller's doneContent, not the badge.
 export const JOB_STATUS_LABELS: Record<PackageJobStatus, string> = {
   pending: "Pending",
+  preparing: "Preparing on source",
   "transferring-chunks": "Transferring",
   packaging: "Packaging",
   consuming: "Consuming",
   done: "Done",
+  "done-with-errors": "Done with errors",
   failed: "Failed",
 };
 
-export const JOB_STATUS_COLORS: Record<PackageJobStatus, "neutral" | "primary" | "success" | "danger"> = {
+export const JOB_STATUS_COLORS: Record<PackageJobStatus, "neutral" | "primary" | "success" | "warning" | "danger"> = {
   pending: "neutral",
+  preparing: "primary",
   "transferring-chunks": "primary",
   packaging: "primary",
   consuming: "primary",
   done: "success",
+  "done-with-errors": "warning",
   failed: "danger",
 };
