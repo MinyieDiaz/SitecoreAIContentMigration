@@ -4,6 +4,13 @@
 // so the host's fetch can't read it).
 const TRANSIENT_ERROR = /failed to fetch|network ?error|load failed|timed? ?out|\b(408|429|502|503|504)\b/i;
 
+// The Marketplace SDK's own "[client SDK] Request timed out": the request
+// already waited the full SDK timeout (see use-marketplace-client.ts), so one
+// more try is worth it -- the source may have finished building the chunk in
+// the meantime -- but several more would just stack up long waits.
+const SDK_TIMEOUT_ERROR = /\[client SDK\] Request timed out/i;
+const SDK_TIMEOUT_ATTEMPTS = 2;
+
 export function isTransientError(error: unknown): boolean {
   return error instanceof Error && TRANSIENT_ERROR.test(error.message);
 }
@@ -20,8 +27,11 @@ export async function withRetry<T>(action: () => Promise<T>, attempts = DEFAULT_
       return await action();
     } catch (error) {
       if (!isTransientError(error)) throw error;
-      if (attempt >= attempts) {
-        (error as Error).message += ` (after ${attempts} attempts)`;
+      const maxAttempts = SDK_TIMEOUT_ERROR.test((error as Error).message)
+        ? Math.min(attempts, SDK_TIMEOUT_ATTEMPTS)
+        : attempts;
+      if (attempt >= maxAttempts) {
+        (error as Error).message += ` (after ${attempt} attempts)`;
         throw error;
       }
       const delayMs = BASE_DELAY_MS * 2 ** (attempt - 1) * (0.75 + Math.random() * 0.5);
