@@ -19,9 +19,19 @@ interface MarketplaceClientState {
 // instance rather than re-negotiating the postMessage handshake.
 let cachedClient: ClientSDK | undefined;
 
+// The SDK's postMessage bridge rejects any request the host hasn't answered
+// within its default of 30s ("[client SDK] Request timed out"), and this init
+// option is the only override (the per-call `timeoutMs` option is logged but
+// never applied, as of SDK 0.3.x). Content Transfer's getChunk for a media
+// chunk -- one chunk can carry hundreds of media items' binaries -- was seen
+// taking longer than 30s on the source while content chunks finished well
+// within it. Applies to every SDK call, so a genuinely hung request also takes
+// this long to surface.
+const SDK_REQUEST_TIMEOUT_MS = 5 * 60 * 1000;
+
 async function getMarketplaceClient(): Promise<ClientSDK> {
   if (cachedClient) return cachedClient;
-  cachedClient = await ClientSDK.init({ target: window.parent, modules: [XMC] });
+  cachedClient = await ClientSDK.init({ target: window.parent, modules: [XMC], timeout: SDK_REQUEST_TIMEOUT_MS });
   return cachedClient;
 }
 

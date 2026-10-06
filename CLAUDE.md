@@ -83,6 +83,11 @@ changed. Key things that are easy to get wrong if re-deriving this from the pros
   consume requested") rather than a resolved name — see `src/lib/types.ts`. The raw `location`-header behavior
   only still matters for the Explorer, which doesn't go through this SDK call at all. The wizard tracks the
   outcome by **blob name** instead, via `xmc.contentTransfer.getBlobState` — see the last section below.
+- The Marketplace SDK's postMessage bridge rejects any request the host hasn't answered within **30s** by default
+  (`[client SDK] Request timed out`, raised in the browser, not by Sitecore). The only override is
+  `ClientSDK.init({ timeout })` — the per-call `timeoutMs` option is logged but never applied (SDK 0.3.x). Media
+  `getChunk` calls were seen exceeding 30s while content chunks didn't, so the app sets a 5-minute timeout in
+  `use-marketplace-client.ts`.
 - `createContentTransfer` returns `202 Accepted` and the source builds the transfer **asynchronously**: poll
   `getContentTransferStatus` until `State` is `Completed` before trusting `ChunkSetsMetadata` (it's empty or
   partial before then). Reading it early is what made `ItemAndDescendants` transfers "finish" instantly with
